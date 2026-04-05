@@ -2,14 +2,7 @@ name = "sentinel-saas"
 main = "workers/main.ts"
 compatibility_date = "2024-06-01"
 compatibility_flags = ["nodejs_compat"]
-
-[env.development]
-name = "sentinel-saas-dev"
 vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug", WORKER_URL = "http://localhost:8787" }
-
-[env.production]
-name = "sentinel-saas-prod"
-vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev" }
 
 # KV Namespace for transformation rule cache + rate limiting
 [[kv_namespaces]]
@@ -23,6 +16,10 @@ binding = "DLQ_BUCKET"
 bucket_name = "sentinel-dlq"
 preview_bucket_name = "sentinel-dlq-preview"
 
+[env.production]
+name = "sentinel-saas-prod"
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev" }
+
 # Secrets (set via `wrangler secret put <n>`)
 # SUPABASE_URL
 # SUPABASE_SERVICE_KEY
@@ -34,9 +31,6 @@ preview_bucket_name = "sentinel-dlq-preview"
 # QSTASH_NEXT_SIGNING_KEY
 # RESEND_API_KEY
 # SENTINEL_WEBHOOK_SECRET
-
-[build]
-command = "npm run build"
 
 [limits]
 cpu_ms = 50

@@ -4,7 +4,7 @@
   "description": "Self-healing AI-powered data pipeline sentinel",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --env development",
+    "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:prod": "wrangler deploy --env production",
     "test": "vitest run",
