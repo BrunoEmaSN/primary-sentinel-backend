@@ -45,7 +45,7 @@ export class SupabaseEventRepository implements IEventRepository {
 
   async findByTenantAndEndpoint(params: {
     tenantId: string;
-    endpointId: string;
+    endpointId?: string;
     status?: EventStatus;
     limit?: number;
     offset?: number;
@@ -54,8 +54,11 @@ export class SupabaseEventRepository implements IEventRepository {
       .from("events")
       .select("*", { count: "exact" })
       .eq("tenant_id", params.tenantId)
-      .eq("endpoint_id", params.endpointId)
       .order("created_at", { ascending: false });
+
+    if (params.endpointId) {
+      query = query.eq("endpoint_id", params.endpointId);
+    }
 
     if (params.status) query = query.eq("status", params.status);
     if (params.limit) query = query.limit(params.limit);

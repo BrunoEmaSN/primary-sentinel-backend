@@ -6,7 +6,8 @@ export interface IEventRepository {
   findById(id: string): Promise<RawEvent | null>;
   findByTenantAndEndpoint(params: {
     tenantId: string;
-    endpointId: string;
+    /** Si falta, se listan eventos de todos los endpoints del tenant. */
+    endpointId?: string;
     status?: EventStatus;
     limit?: number;
     offset?: number;

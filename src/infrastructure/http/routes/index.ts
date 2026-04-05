@@ -291,9 +291,10 @@ async function handleListDLQ(
   const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
   const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
 
+  const endpointId = url.searchParams.get("endpointId");
   const result = await deps.eventRepo.findByTenantAndEndpoint({
     tenantId: auth.tenantId,
-    endpointId: url.searchParams.get("endpointId") ?? "",
+    ...(endpointId ? { endpointId } : {}),
     status: "dead",
     limit,
     offset,
