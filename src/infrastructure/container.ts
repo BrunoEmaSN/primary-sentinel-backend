@@ -15,8 +15,17 @@ import {
 } from "./adapters/external/ExternalAdapters.js";
 import { AnthropicLLMAdapter } from "./adapters/llm/AnthropicLLMAdapter.js";
 import { JSSandboxAdapter } from "./adapters/sandbox/JSSandboxAdapter.js";
-
-export type Dependencies = ReturnType<typeof buildDependencies>;
+export type Dependencies = {
+  eventRepo: SupabaseEventRepository;
+  endpointRepo: SupabaseEndpointRepository;
+  ruleRepo: SupabaseTransformationRuleRepository;
+  ruleCache: UpstashRuleCache;
+  queueService: UpstashQueueService;
+  storageService: R2StorageAdapter;
+  llmService: AnthropicLLMAdapter;
+  notificationService: ResendNotificationService;
+  sandboxService: JSSandboxAdapter;
+};
 
 // Singleton cache per Worker invocation (lives for the duration of the request)
 let _deps: Dependencies | null = null;

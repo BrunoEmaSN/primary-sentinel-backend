@@ -39,7 +39,7 @@ export class CreateEndpoint {
       slug,
       schema: command.schema,
       destination: command.destination,
-      healingConfig: command.healingConfig,
+      ...(command.healingConfig ? { healingConfig: command.healingConfig } : {}),
       webhookSecret,
     });
 

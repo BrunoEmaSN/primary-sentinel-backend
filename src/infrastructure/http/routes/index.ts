@@ -158,6 +158,12 @@ async function handleWebhook(
     deps.notificationService,
     deps.sandboxService
   );
+  const requestHeaders: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    requestHeaders[key] = value;
+  });
+  const ipAddress = request.headers.get("CF-Connecting-IP");
+  const userAgent = request.headers.get("User-Agent");
 
   const result = await useCase.execute({
     eventId,
@@ -166,9 +172,9 @@ async function handleWebhook(
     rawPayload,
     metadata: {
       contentType: request.headers.get("Content-Type") ?? "application/json",
-      headers: Object.fromEntries(request.headers.entries()),
-      ipAddress: request.headers.get("CF-Connecting-IP") ?? undefined,
-      userAgent: request.headers.get("User-Agent") ?? undefined,
+      headers: requestHeaders,
+      ...(ipAddress !== null ? { ipAddress } : {}),
+      ...(userAgent !== null ? { userAgent } : {}),
     },
     origin: request.headers.get("Origin") ?? url.origin,
   });
@@ -193,13 +199,16 @@ async function handleCreateEndpoint(
     deps.endpointRepo,
     `https://${env.ENVIRONMENT === "production" ? "api.sentinel.yourdomain.com" : "sentinel-saas-dev.yourworker.workers.dev"}`
   );
+  const healingConfig = body["healingConfig"] as
+    Partial<import("../../../domain/events/entities/Endpoint.js").HealingConfig> |
+    undefined;
 
   const result = await useCase.execute({
     tenantId: auth.tenantId,
     name: body["name"] as string,
     schema: body["schema"] as Record<string, unknown>,
     destination: body["destination"] as import("../../../domain/events/entities/Endpoint.js").Destination,
-    healingConfig: body["healingConfig"] as Record<string, unknown> | undefined,
+    ...(healingConfig ? { healingConfig } : {}),
   });
 
   return jsonResponse(result, 201);
@@ -248,7 +257,7 @@ async function handleListEvents(
   const result = await deps.eventRepo.findByTenantAndEndpoint({
     tenantId: auth.tenantId,
     endpointId,
-    status,
+    ...(status !== undefined ? { status } : {}),
     limit,
     offset,
   });

@@ -198,15 +198,17 @@ export class Endpoint {
     // Dynamically build a Zod schema from JSON Schema
     // Simplified implementation — in production use @anatine/zod-openapi
     const shape: z.ZodRawShape = {};
+    const schemaProperties = this.schema["properties"];
+    const requiredFields = this.schema["required"];
 
     if (
-      this.schema.properties &&
-      typeof this.schema.properties === "object"
+      schemaProperties &&
+      typeof schemaProperties === "object"
     ) {
-      for (const [key, value] of Object.entries(this.schema.properties)) {
+      for (const [key, value] of Object.entries(schemaProperties)) {
         const fieldDef = value as Record<string, unknown>;
-        const isRequired = Array.isArray(this.schema.required) &&
-          (this.schema.required as string[]).includes(key);
+        const isRequired = Array.isArray(requiredFields) &&
+          (requiredFields as string[]).includes(key);
 
         let zodType: z.ZodTypeAny;
 
