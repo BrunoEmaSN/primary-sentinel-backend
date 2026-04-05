@@ -48,7 +48,7 @@ Incoming Webhook
 | Worker | Cloudflare Workers | API Gateway, DataValidator, DataLoader |
 | Database | Supabase (PostgreSQL) | Events, Endpoints, Rules, Auth |
 | Cache | Upstash Redis | Transformation rule cache (Cache-Aside) |
-| Queue | Upstash Kafka | Async event bus |
+| Queue | Upstash Qstash | Async event bus |
 | Storage | Cloudflare R2 | Dead Letter Queue raw payloads |
 | LLM | Anthropic Claude | Generating transformation scripts |
 | Email | Resend | Healing & DLQ notifications |
@@ -78,7 +78,7 @@ sentinel-saas/
 │   └── infrastructure/
 │       ├── adapters/
 │       │   ├── database/                # Supabase implementations
-│       │   ├── external/                # Redis, Kafka, R2, Resend
+│       │   ├── external/                # Redis, QStash, R2, Resend
 │       │   ├── llm/                     # Anthropic adapter
 │       │   └── sandbox/                 # JS execution sandbox
 │       ├── http/
@@ -120,14 +120,14 @@ npm install
 
 **Upstash**
 1. Create a Redis database at [upstash.com](https://upstash.com)
-2. Create a Kafka cluster (or use Redis Pub/Sub for simpler setup)
+2. Create a QStash
 3. Copy credentials
 
 **Cloudflare**
 ```bash
 wrangler login
-wrangler kv:namespace create "RULE_CACHE"         # copy ID to wrangler.toml
-wrangler kv:namespace create "RULE_CACHE" --preview
+wrangler kv namespace create RULE_CACHE        # copy ID to wrangler.toml
+wrangler kv namespace create RULE_CACHE --preview
 wrangler r2 bucket create sentinel-dlq
 wrangler queues create sentinel-events
 ```
@@ -144,9 +144,9 @@ wrangler secret put SUPABASE_SERVICE_KEY
 wrangler secret put ANTHROPIC_API_KEY
 wrangler secret put UPSTASH_REDIS_REST_URL
 wrangler secret put UPSTASH_REDIS_REST_TOKEN
-wrangler secret put UPSTASH_KAFKA_URL
-wrangler secret put UPSTASH_KAFKA_USERNAME
-wrangler secret put UPSTASH_KAFKA_PASSWORD
+wrangler secret put QSTASH_TOKEN
+wrangler secret put QSTASH_CURRENT_SIGNING_KEY
+wrangler secret put QSTASH_NEXT_SIGNING_KEY
 wrangler secret put RESEND_API_KEY
 ```
 
@@ -256,7 +256,7 @@ WORKER_URL=http://localhost:8787 \
 | Cloudflare R2 | 10GB storage | DLQ payloads |
 | Supabase | 500MB DB, 2GB bandwidth | |
 | Upstash Redis | 10,000 req/day | Rule cache |
-| Upstash Kafka | 10,000 messages/day | Event queue |
+| Upstash QStash | 10,000 messages/day | Event queue |
 | Resend | 3,000 emails/month | Notifications |
 | Anthropic | Pay-per-use | ~$0.003/healing call with Sonnet |
 

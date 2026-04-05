@@ -14,8 +14,8 @@ vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://s
 # KV Namespace for transformation rule cache + rate limiting
 [[kv_namespaces]]
 binding = "RULE_CACHE"
-id = "YOUR_KV_NAMESPACE_ID"
-preview_id = "YOUR_KV_PREVIEW_ID"
+id = "f66be187e4f54bc2a5325c20c29490b2"
+preview_id = "c9a95b19ba034127ad9a667249442778"
 
 # R2 Bucket for Dead Letter Queue storage
 [[r2_buckets]]
