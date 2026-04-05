@@ -23,30 +23,6 @@ export class UpstashRuleCache implements IRuleCache {
   }
 }
 
-// ── Upstash Queue (Kafka-based event bus) ─────────────────────────────────
-
-import { Kafka } from "@upstash/kafka";
-import type { IQueueService, QueueMessage } from "../../../application/ports/index.js";
-
-export class UpstashQueueService implements IQueueService {
-  private producer: ReturnType<Kafka["producer"]>;
-  private topic = "sentinel-events";
-
-  constructor(url: string, username: string, password: string) {
-    const kafka = new Kafka({ url, username, password });
-    this.producer = kafka.producer();
-  }
-
-  async enqueue(message: QueueMessage): Promise<void> {
-    await this.producer.produce(this.topic, JSON.stringify(message));
-  }
-
-  async enqueueBatch(messages: QueueMessage[]): Promise<void> {
-    await this.producer.produceMany(
-      messages.map((m) => ({ topic: this.topic, value: JSON.stringify(m) }))
-    );
-  }
-}
 
 // ── Cloudflare R2 Storage (Dead Letter Queue) ─────────────────────────────
 

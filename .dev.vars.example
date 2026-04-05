@@ -15,10 +15,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-token
 
-# ── Upstash Kafka (Event Queue) ───────────────────────────
-UPSTASH_KAFKA_URL=your-kafka-bootstrap-url:9092
-UPSTASH_KAFKA_USERNAME=your-username
-UPSTASH_KAFKA_PASSWORD=your-password
+# ── Upstash QStash (Event Queue) ──────────────────────────
+# console.upstash.com → tab "QStash" → copiar las 3 vars
+QSTASH_TOKEN=qstash_...
+QSTASH_CURRENT_SIGNING_KEY=sig_...
+QSTASH_NEXT_SIGNING_KEY=sig_...
+
+# URL pública de tu Worker (para QStash callbacks)
+# En dev: http://localhost:8787 | En prod: tu URL de workers.dev
+WORKER_URL=http://localhost:8787
 
 # ── Resend (Email Notifications) ─────────────────────────
 RESEND_API_KEY=re_...

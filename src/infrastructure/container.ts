@@ -9,23 +9,14 @@ import {
 } from "./adapters/database/SupabaseAdapters.js";
 import {
   UpstashRuleCache,
-  UpstashQueueService,
   R2StorageAdapter,
   ResendNotificationService,
 } from "./adapters/external/ExternalAdapters.js";
+import { QStashQueueAdapter } from "./adapters/external/QStashQueueAdapter.js";
 import { AnthropicLLMAdapter } from "./adapters/llm/AnthropicLLMAdapter.js";
 import { JSSandboxAdapter } from "./adapters/sandbox/JSSandboxAdapter.js";
-export type Dependencies = {
-  eventRepo: SupabaseEventRepository;
-  endpointRepo: SupabaseEndpointRepository;
-  ruleRepo: SupabaseTransformationRuleRepository;
-  ruleCache: UpstashRuleCache;
-  queueService: UpstashQueueService;
-  storageService: R2StorageAdapter;
-  llmService: AnthropicLLMAdapter;
-  notificationService: ResendNotificationService;
-  sandboxService: JSSandboxAdapter;
-};
+
+export type Dependencies = ReturnType<typeof buildDependencies>;
 
 // Singleton cache per Worker invocation (lives for the duration of the request)
 let _deps: Dependencies | null = null;
@@ -55,11 +46,10 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
     env.UPSTASH_REDIS_REST_TOKEN
   );
 
-  // ── Event Queue (Upstash Kafka) ───────────────────────────────────────
-  const queueService = new UpstashQueueService(
-    env.UPSTASH_KAFKA_URL,
-    env.UPSTASH_KAFKA_USERNAME,
-    env.UPSTASH_KAFKA_PASSWORD
+  // ── Event Queue (Upstash QStash) ─────────────────────────────────────
+  const queueService = new QStashQueueAdapter(
+    env.QSTASH_TOKEN,
+    env.WORKER_URL
   );
 
   // ── Object Storage (Cloudflare R2) ────────────────────────────────────

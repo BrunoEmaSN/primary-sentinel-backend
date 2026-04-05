@@ -18,14 +18,14 @@ export type WorkerEnv = {
   ANTHROPIC_API_KEY: string;
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
-  UPSTASH_KAFKA_URL: string;
-  UPSTASH_KAFKA_USERNAME: string;
-  UPSTASH_KAFKA_PASSWORD: string;
+  QSTASH_TOKEN: string;         // Upstash QStash (reemplaza Kafka)
+  QSTASH_CURRENT_SIGNING_KEY: string; // Para verificar que los callbacks vienen de QStash
+  QSTASH_NEXT_SIGNING_KEY: string;
+  WORKER_URL: string;           // URL pública del Worker (para QStash callbacks)
   RESEND_API_KEY: string;
   SENTINEL_WEBHOOK_SECRET: string;
   RULE_CACHE: KVNamespace;
   DLQ_BUCKET: R2Bucket;
-  EVENT_QUEUE: Queue;
   ENVIRONMENT: string;
 };
 
@@ -88,14 +88,10 @@ export async function validateWebhookSignature(
   );
 
   const signatureBytes = hexToBytes(signature.replace("sha256=", ""));
-  const signatureBuffer = signatureBytes.buffer.slice(
-    signatureBytes.byteOffset,
-    signatureBytes.byteOffset + signatureBytes.byteLength
-  );
-  return await crypto.subtle.verify("HMAC", key, signatureBuffer, messageData);
+  return await crypto.subtle.verify("HMAC", key, signatureBytes, messageData);
 }
 
-function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
+function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
