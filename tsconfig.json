@@ -9,12 +9,12 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "noPropertyAccessFromIndexSignature": true,
-    "baseUrl": ".",
     "paths": {
-      "@domain/*": ["src/domain/*"],
-      "@application/*": ["src/application/*"],
-      "@infrastructure/*": ["src/infrastructure/*"],
-      "@config/*": ["config/*"]
+      "*": ["./*"],
+      "@domain/*": ["./src/domain/*"],
+      "@application/*": ["./src/application/*"],
+      "@infrastructure/*": ["./src/infrastructure/*"],
+      "@config/*": ["./config/*"]
     },
     "types": ["@cloudflare/workers-types"],
     "outDir": "dist",
