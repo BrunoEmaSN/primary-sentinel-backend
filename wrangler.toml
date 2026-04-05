@@ -1,0 +1,58 @@
+name = "sentinel-saas"
+main = "workers/main.ts"
+compatibility_date = "2024-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+[env.development]
+name = "sentinel-saas-dev"
+vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug" }
+
+[env.production]
+name = "sentinel-saas-prod"
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info" }
+
+# KV Namespace for transformation rule cache
+[[kv_namespaces]]
+binding = "RULE_CACHE"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_KV_PREVIEW_ID"
+
+# R2 Bucket for Dead Letter Queue storage
+[[r2_buckets]]
+binding = "DLQ_BUCKET"
+bucket_name = "sentinel-dlq"
+preview_bucket_name = "sentinel-dlq-preview"
+
+# Queue for async event processing
+[[queues.producers]]
+binding = "EVENT_QUEUE"
+queue = "sentinel-events"
+
+[[queues.consumers]]
+queue = "sentinel-events"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "sentinel-dlq-queue"
+
+# Secrets (set via `wrangler secret put <NAME>`)
+# SUPABASE_URL
+# SUPABASE_SERVICE_KEY
+# ANTHROPIC_API_KEY
+# UPSTASH_REDIS_REST_URL
+# UPSTASH_REDIS_REST_TOKEN
+# UPSTASH_KAFKA_URL
+# UPSTASH_KAFKA_USERNAME
+# UPSTASH_KAFKA_PASSWORD
+# RESEND_API_KEY
+# SENTINEL_WEBHOOK_SECRET
+
+[build]
+command = "npm run build"
+
+[limits]
+cpu_ms = 50
+
+[[rules]]
+type = "ESModule"
+globs = ["**/*.ts"]
