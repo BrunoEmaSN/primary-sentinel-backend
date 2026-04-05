@@ -7,7 +7,6 @@ import type { IEndpointRepository } from "../../domain/events/repositories/IEndp
 import type { ITransformationRuleRepository, IRuleCache } from "../../domain/healing/repositories/ITransformationRuleRepository.js";
 import type {
   ILLMService,
-  IQueueService,
   IStorageService,
   INotificationService,
   ISandboxService,
@@ -45,7 +44,6 @@ export class ProcessWebhookEvent {
     private readonly ruleRepo: ITransformationRuleRepository,
     private readonly ruleCache: IRuleCache,
     private readonly llmService: ILLMService,
-    private readonly queueService: IQueueService,
     private readonly storageService: IStorageService,
     private readonly notificationService: INotificationService,
     private readonly sandboxService: ISandboxService
@@ -274,6 +272,8 @@ export class ProcessWebhookEvent {
     if (endpoint.healingConfig.notifyOnDead) {
       await this.notificationService.send({
         type: "dead_letter",
+        tenantId: event.tenantId,
+        endpointId: endpoint.id,
         tenantEmail: "", // fetched from tenant record in production
         endpointName: endpoint.name,
         eventId: event.id,
@@ -292,6 +292,8 @@ export class ProcessWebhookEvent {
     method: string
   ): Promise<void> {
     await this.notificationService.send({
+      tenantId: event.tenantId,
+      endpointId: endpoint.id,
       type: "healing_success",
       tenantEmail: "",
       endpointName: endpoint.name,

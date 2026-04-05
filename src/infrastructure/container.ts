@@ -68,7 +68,7 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   const llmService = new AnthropicLLMAdapter(env.ANTHROPIC_API_KEY);
 
   // ── Notifications (Resend) ────────────────────────────────────────────
-  const notificationService = new ResendNotificationService(env.RESEND_API_KEY);
+  const notificationService = new ResendNotificationService(env.RESEND_API_KEY, env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
 
   // ── Sandbox (JS runtime) ──────────────────────────────────────────────
   const sandboxService = new JSSandboxAdapter();

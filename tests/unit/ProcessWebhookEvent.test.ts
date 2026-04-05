@@ -1,6 +1,9 @@
 // tests/unit/ProcessWebhookEvent.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ProcessWebhookEvent } from "../../src/application/use-cases/ProcessWebhookEvent.js";
+import {
+  ProcessWebhookEvent,
+  EndpointNotFoundError,
+} from "../../src/application/use-cases/ProcessWebhookEvent.js";
 import { RawEvent } from "../../src/domain/events/entities/RawEvent.js";
 import { Endpoint } from "../../src/domain/events/entities/Endpoint.js";
 import { TransformationRule } from "../../src/domain/healing/entities/TransformationRule.js";
@@ -81,10 +84,6 @@ function makeMocks() {
         modelUsed: "claude-sonnet-4-20250514",
       }),
     },
-    queueService: {
-      enqueue: vi.fn().mockResolvedValue(undefined),
-      enqueueBatch: vi.fn().mockResolvedValue(undefined),
-    },
     storageService: {
       store: vi.fn().mockResolvedValue("dlq/tenant-001/evt-001.json"),
       retrieve: vi.fn().mockResolvedValue(null),
@@ -119,7 +118,6 @@ describe("ProcessWebhookEvent", () => {
       mocks.ruleRepo as never,
       mocks.ruleCache as never,
       mocks.llmService as never,
-      mocks.queueService as never,
       mocks.storageService as never,
       mocks.notificationService as never,
       mocks.sandboxService as never
@@ -231,7 +229,7 @@ describe("ProcessWebhookEvent", () => {
     it("should throw if endpoint not found", async () => {
       mocks.endpointRepo.findBySlug.mockResolvedValue(null);
       const useCase = buildUseCase();
-      await expect(useCase.execute(makeCommand())).rejects.toThrow("EndpointNotFoundError");
+      await expect(useCase.execute(makeCommand())).rejects.toThrow(EndpointNotFoundError);
     });
   });
 });

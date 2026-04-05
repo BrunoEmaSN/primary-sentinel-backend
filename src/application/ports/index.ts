@@ -47,6 +47,8 @@ export type NotificationType =
   | "rule_quarantined";
 
 export type NotificationPayload = {
+  tenantId: string;
+  endpointId?: string;
   type: NotificationType;
   tenantEmail: string;
   endpointName: string;

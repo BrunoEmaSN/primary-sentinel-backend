@@ -58,17 +58,33 @@ import type {
   INotificationService,
   NotificationPayload,
 } from "../../../application/ports/index.js";
+import { createClient } from "@supabase/supabase-js";
 
 export class ResendNotificationService implements INotificationService {
   private client: Resend;
+  private supabaseUrl: string;
+  private supabaseKey: string;
   private fromEmail = "sentinel@notifications.yourdomain.com";
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, supabaseUrl: string, supabaseKey: string) {
     this.client = new Resend(apiKey);
+    this.supabaseUrl = supabaseUrl;
+    this.supabaseKey = supabaseKey;
   }
 
   async send(payload: NotificationPayload): Promise<void> {
     const { subject, html } = this.buildEmail(payload);
+
+    // Persistir en Supabase para el dashboard
+    const supabase = createClient(this.supabaseUrl, this.supabaseKey);
+    await supabase.from("notifications").insert({
+      tenant_id: payload.tenantId,   // necesitás agregar tenantId al NotificationPayload
+      type: payload.type,
+      title: subject,
+      message: `Event ${payload.eventId} — ${payload.endpointName}`,
+      endpoint_id: payload.endpointId ?? null,
+      event_id: payload.eventId,
+    });
 
     await this.client.emails.send({
       from: this.fromEmail,
