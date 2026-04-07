@@ -1,4 +1,5 @@
-// src/application/ports/ILLMService.ts
+// src/application/ports/index.ts
+
 export type HealingRequest = {
   expectedSchema: Record<string, unknown>;
   receivedPayload: unknown;
@@ -11,7 +12,7 @@ export type HealingResult = {
   script: string;
   description: string;
   language: "javascript" | "json-map";
-  confidence: number; // 0-1
+  confidence: number;
   modelUsed: string;
 };
 
@@ -19,27 +20,12 @@ export interface ILLMService {
   generateTransformationScript(request: HealingRequest): Promise<HealingResult>;
 }
 
-// src/application/ports/IQueueService.ts
-export type QueueMessage = {
-  eventId: string;
-  tenantId: string;
-  endpointId: string;
-  action: "validate" | "heal" | "load" | "dlq";
-};
-
-export interface IQueueService {
-  enqueue(message: QueueMessage): Promise<void>;
-  enqueueBatch(messages: QueueMessage[]): Promise<void>;
-}
-
-// src/application/ports/IStorageService.ts
 export interface IStorageService {
-  store(key: string, data: unknown): Promise<string>; // returns object URL
+  store(key: string, data: unknown): Promise<string>;
   retrieve(key: string): Promise<unknown | null>;
   delete(key: string): Promise<void>;
 }
 
-// src/application/ports/INotificationService.ts
 export type NotificationType =
   | "healing_success"
   | "healing_failure"
@@ -60,7 +46,6 @@ export interface INotificationService {
   send(payload: NotificationPayload): Promise<void>;
 }
 
-// src/application/ports/ISandboxService.ts
 export type SandboxResult = {
   success: boolean;
   output: unknown;

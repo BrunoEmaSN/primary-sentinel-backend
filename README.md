@@ -1,10 +1,43 @@
-# 🛡️ Sentinel SaaS — Self-Healing AI Data Pipeline
+<div align="center">
+  <img width="1888" height="544" alt="primary-sentinel-background" src="https://github.com/user-attachments/assets/8775ec60-358e-4740-b5db-0fd5500d780f" />
+  <br />
+  <div>
+    <img src="https://img.shields.io/badge/-Google%20Cloud-black?style=for-the-badge&logo=googlecloud&color=000000" alt="google cloud" />
+    <img src="https://img.shields.io/badge/-Supabase-black?style=for-the-badge&logo=supabase&logoColor=3CC88B&color=000000" alt="supabase" />
+    <img src="https://img.shields.io/badge/-Cloudflare-black?style=for-the-badge&logo=cloudflare&logoColor=EB7D20&color=000000" alt="cloudflare" />
+    <img src="https://img.shields.io/badge/-Mysql-black?style=for-the-badge&logo=mysql&color=000000" alt="mysql" />
+    <img src="https://img.shields.io/badge/-Claude-black?style=for-the-badge&logo=claude&color=000000" alt="claude" />
+  </div>
+  
+  <h3 align="center">
+    <img width="15" height="15" alt="logo" src="https://github.com/user-attachments/assets/84318606-0d4d-4461-8bd3-1c11b746946a" />
+    PRIMARY SENTINEL BACKEND
+  </h3>
+</div>
 
-> Zero-downtime API integration that automatically detects, fixes, and learns from schema mutations using AI.
+> Zero-downtime webhook integration that auto-detects, fixes, and learns from schema mutations.  
+> **v2 adds multi-destination fanout**: send validated payloads to Supabase + any webhook/API simultaneously.
 
 ---
 
-## Architecture Overview
+## What's new in v2
+
+| Feature | v1 | v2 |
+|---|---|---|
+| Destinations per endpoint | 1 | Up to 5 (fanout) |
+| Webhook relay | ❌ | ✅ POST to any URL |
+| HTTP API with auth | ❌ | ✅ Bearer / Basic / API Key |
+| Per-destination observability | ❌ | ✅ `dispatchResults` in every event |
+| Partial failure handling | ❌ | ✅ `Promise.allSettled` — one fail ≠ DLQ |
+| Backwards compat (`destination`) | — | ✅ auto-migrated to `destinations[]` |
+| External Supabase project | ❌ | ✅ `projectUrl` + `serviceKey` (or `apiKey` alias) |
+| PostgreSQL / MySQL | ❌ | ✅ `INSERT` JSON column via `postgres` / `mysql2` |
+| BigQuery streaming | ❌ | ✅ REST `insertAll` + service account JSON |
+| Encrypted destination secrets | ❌ | ✅ AES-GCM with `SENTINEL_DESTINATION_SECRET_KEY` |
+
+---
+
+## Architecture
 
 ```
 Incoming Webhook
@@ -18,125 +51,63 @@ Incoming Webhook
          │
          ▼
 ┌─────────────────┐      ✅ Valid
-│  DataValidator  │─────────────────────► DataLoader ──► DWH
-│  (Zod Schema)   │
-└────────┬────────┘
-         │ ❌ Invalid
-         ▼
-┌─────────────────┐
-│  HealingAgent   │
-│                 │
-│  A: Cache?──►Yes─────────────────────► Apply Rule ──► DataLoader
-│  B: No ──► LLM ──► Sandbox ──► Valid?─► Save Rule ──► DataLoader
-│            │                   Invalid?─────────────────────────┐
-│            │ LLM Error                                          │
-└────────────┼───────────────────────────────────────────────────┼─┘
-             │                                                    │
-             ▼                                                    ▼
-     ┌───────────────┐                                  ┌────────────────┐
-     │  Dead Letter  │                                  │  Dead Letter   │
-     │  Queue (R2)   │                                  │  Queue (R2)    │
-     └───────────────┘                                  └────────────────┘
-             │                                                    │
-             └──────────────── 🚨 Alert Email ───────────────────┘
+│  DataValidator  │─────────────────────────────────────────┐
+│  (Zod Schema)   │                                         │
+└────────┬────────┘                                         │
+         │ ❌ Invalid                                        │
+         ▼                                                   │
+┌─────────────────┐                                         │
+│  HealingAgent   │                                         │
+│  A: Cache? ──►Yes──► Apply Rule ──► Re-validate ──────────┤
+│  B: No ──► LLM ──► Sandbox ──► Re-validate ───────────────┤
+│            │ fail                                         │
+└────────────┼──────────────────────────────────────────────┘
+             │                                              │
+             ▼                                              ▼
+     ┌───────────────┐               ┌────────────────────────────────┐
+     │  Dead Letter  │               │  OutputDispatcher (NEW v2)     │
+     │  Queue (R2)   │               │                                │
+     └───────────────┘               │  destinations[0] → Supabase   │
+             │                       │  destinations[1] → Webhook     │
+             └── 🚨 Alert Email      │  destinations[2] → HTTP API    │
+                                     │                                │
+                                     │  Promise.allSettled(all)       │
+                                     │  partial fail → still loaded   │
+                                     └────────────────────────────────┘
 ```
 
-## Tech Stack (100% Free Tier)
-
-| Layer | Service | Purpose |
-|---|---|---|
-| Worker | Cloudflare Workers | API Gateway, DataValidator, DataLoader |
-| Database | Supabase (PostgreSQL) | Events, Endpoints, Rules, Auth |
-| Cache | Upstash Redis | Transformation rule cache (Cache-Aside) |
-| Queue | Upstash Qstash | Async event bus |
-| Storage | Cloudflare R2 | Dead Letter Queue raw payloads |
-| LLM | Anthropic Claude | Generating transformation scripts |
-| Email | Resend | Healing & DLQ notifications |
-
-## Project Structure
-
-```
-sentinel-saas/
-├── workers/
-│   └── main.ts                          # CF Worker entry point
-├── src/
-│   ├── domain/                          # Pure business logic
-│   │   ├── events/
-│   │   │   ├── entities/
-│   │   │   │   ├── RawEvent.ts          # Core aggregate
-│   │   │   │   └── Endpoint.ts          # Tenant webhook config
-│   │   │   └── repositories/            # Interface contracts
-│   │   └── healing/
-│   │       ├── entities/
-│   │       │   └── TransformationRule.ts # AI-learned fix
-│   │       └── repositories/
-│   ├── application/
-│   │   ├── use-cases/
-│   │   │   ├── ProcessWebhookEvent.ts   # Main orchestrator
-│   │   │   └── ManageEndpoint.ts        # CRUD use cases
-│   │   └── ports/                       # External service interfaces
-│   └── infrastructure/
-│       ├── adapters/
-│       │   ├── database/                # Supabase implementations
-│       │   ├── external/                # Redis, QStash, R2, Resend
-│       │   ├── llm/                     # Anthropic adapter
-│       │   └── sandbox/                 # JS execution sandbox
-│       ├── http/
-│       │   ├── middleware/              # Auth, rate limit, CORS
-│       │   └── routes/                  # API Gateway router
-│       ├── utils/                       # Logger, crypto helpers
-│       └── container.ts                 # Dependency injection
-├── migrations/
-│   └── 001_schema.sql                   # Complete DB schema
-├── tests/
-│   ├── unit/                            # Domain & use case tests
-│   └── integration/                     # Full pipeline tests
-└── wrangler.toml                        # CF Workers config
-```
+---
 
 ## Quick Start
 
-### 1. Prerequisites
-
-```bash
-npm install -g wrangler
-node --version  # >= 18
-```
-
-### 2. Clone & Install
+### 1. Setup
 
 ```bash
 git clone <your-repo>
-cd sentinel-saas
+cd sentinel-saas-backend
 npm install
+cp .dev.vars.example .dev.vars
+# Fill in .dev.vars with your credentials
 ```
 
-### 3. Configure External Services
+### 2. Cloudflare resources
 
-**Supabase**
-1. Create a project at [supabase.com](https://supabase.com)
-2. Go to SQL Editor → paste `migrations/001_schema.sql` → Run
-3. Copy your Project URL and `service_role` key
-
-**Upstash**
-1. Create a Redis database at [upstash.com](https://upstash.com)
-2. Create a QStash
-3. Copy credentials
-
-**Cloudflare**
 ```bash
 wrangler login
-wrangler kv namespace create RULE_CACHE        # copy ID to wrangler.toml
-wrangler kv namespace create RULE_CACHE --preview
+wrangler kv:namespace create "RULE_CACHE"
+wrangler kv:namespace create "RULE_CACHE" --preview
 wrangler r2 bucket create sentinel-dlq
-wrangler queues create sentinel-events
 ```
 
-**Resend**
-1. Sign up at [resend.com](https://resend.com) (free: 3,000 emails/month)
-2. Add and verify your sending domain
+Copy the KV IDs into `wrangler.toml`.
 
-### 4. Set Secrets
+### 3. Supabase
+
+1. Create a project at [supabase.com](https://supabase.com)
+2. SQL Editor → paste `migrations/001_schema.sql` → Run
+3. Copy your Project URL and `service_role` key
+
+### 4. Secrets
 
 ```bash
 wrangler secret put SUPABASE_URL
@@ -144,62 +115,48 @@ wrangler secret put SUPABASE_SERVICE_KEY
 wrangler secret put ANTHROPIC_API_KEY
 wrangler secret put UPSTASH_REDIS_REST_URL
 wrangler secret put UPSTASH_REDIS_REST_TOKEN
-wrangler secret put QSTASH_TOKEN
-wrangler secret put QSTASH_CURRENT_SIGNING_KEY
-wrangler secret put QSTASH_NEXT_SIGNING_KEY
 wrangler secret put RESEND_API_KEY
+wrangler secret put SENTINEL_WEBHOOK_SECRET
+# Strongly recommended in production: 32-byte key as base64 (openssl rand -base64 32)
+wrangler secret put SENTINEL_DESTINATION_SECRET_KEY
 ```
 
-### 5. Local Development
+If `SENTINEL_DESTINATION_SECRET_KEY` is omitted, destination secrets (connection strings, API keys, service account JSON) are stored **in plaintext** in Supabase JSONB.
+
+Raise `[limits] cpu_ms` in `wrangler.toml` if dispatching to BigQuery or SQL hits CPU timeouts.
+
+### 5. Dev & Deploy
 
 ```bash
-cp .dev.vars.example .dev.vars
-# Edit .dev.vars with your actual credentials
-npm run dev
-# Worker available at http://localhost:8787
+npm run dev           # http://localhost:8787
+npm run deploy        # staging
+npm run deploy:prod   # production
+npm test              # unit tests
 ```
 
-### 6. Deploy
-
-```bash
-npm run deploy           # staging
-npm run deploy:prod      # production
-```
+---
 
 ## API Reference
 
-### Webhook Receiver (Public)
+### POST `/webhook/:tenantId/:endpointSlug`
 
-```
-POST /webhook/:tenantId/:endpointSlug
-```
+Public. Receives raw payload, validates, heals, dispatches to all destinations.
 
-| Header | Required | Description |
-|---|---|---|
-| `Content-Type` | Yes | `application/json` |
-| `X-Event-ID` | No | Idempotency key (auto-generated if missing) |
-| `X-Sentinel-Signature` | No | HMAC-SHA256 of body with your webhook secret |
-
-**Response**
+**Response:**
 ```json
-{ "eventId": "...", "status": "loaded|healed|dead", "message": "..." }
+{
+  "eventId": "...",
+  "status": "loaded | healed | dead",
+  "message": "Event loaded and dispatched to all 2 destination(s)",
+  "dispatchResults": [
+    { "destinationType": "supabase", "destinationIndex": 0, "success": true, "durationMs": 45 },
+    { "destinationType": "webhook",  "destinationIndex": 1, "success": true, "durationMs": 120 }
+  ]
+}
 ```
 
-### Endpoint Management (Authenticated)
+### POST `/api/endpoints` — Create endpoint
 
-All endpoints require `Authorization: Bearer <supabase-jwt>`.
-
-```
-POST   /api/endpoints              # Create endpoint
-GET    /api/endpoints              # List endpoints
-GET    /api/endpoints/:id          # Get endpoint
-DELETE /api/endpoints/:id          # Delete endpoint
-GET    /api/endpoints/:id/events   # List events (?status=&limit=&offset=)
-GET    /api/endpoints/:id/rules    # List transformation rules
-GET    /api/dlq                    # Dead letter queue
-```
-
-**Create Endpoint Body**
 ```json
 {
   "name": "Stripe Webhooks",
@@ -207,64 +164,119 @@ GET    /api/dlq                    # Dead letter queue
     "type": "object",
     "required": ["id", "type", "data"],
     "properties": {
-      "id":      { "type": "string" },
-      "type":    { "type": "string" },
-      "data":    { "type": "object" },
-      "created": { "type": "number" }
+      "id":   { "type": "string" },
+      "type": { "type": "string" },
+      "data": { "type": "object" }
     }
   },
-  "destination": {
-    "type": "supabase",
-    "tableName": "stripe_events"
-  },
+  "destinations": [
+    {
+      "type": "supabase",
+      "tableName": "stripe_events"
+    },
+    {
+      "type": "webhook",
+      "url": "https://your-crm.example.com/ingest",
+      "method": "POST",
+      "headers": { "X-Source": "sentinel" },
+      "timeoutMs": 5000
+    },
+    {
+      "type": "http_api",
+      "url": "https://api.datawarehouse.io/events",
+      "method": "POST",
+      "authType": "bearer",
+      "authValue": "your-dwh-token",
+      "timeoutMs": 8000
+    }
+  ],
   "healingConfig": {
     "enabled": true,
     "maxAttempts": 3,
-    "autoApplyRules": true,
     "notifyOnHealing": true,
     "notifyOnDead": true
   }
 }
 ```
 
-## Testing
+**Destination types:**
 
-```bash
-npm test                          # Unit tests
-npm run test:coverage             # With coverage report
-WORKER_URL=http://localhost:8787 \
-  TEST_TENANT_TOKEN=<jwt> \
-  npx vitest run tests/integration  # Integration tests (requires running worker)
+| Type | Required fields | Auth |
+|---|---|---|
+| `supabase` | `tableName` | Uses Sentinel's Supabase key (or override with `projectUrl`+`serviceKey`) |
+| `webhook` | `url` | Optional `headers` map |
+| `http_api` | `url` | `authType`: `bearer`, `basic`, `api_key`, `none` |
+
+### Other protected endpoints (require `Authorization: Bearer <jwt>`)
+
+```
+GET    /api/endpoints              # List endpoints
+GET    /api/endpoints/:id          # Get endpoint
+DELETE /api/endpoints/:id          # Delete endpoint
+GET    /api/endpoints/:id/events   # Events (?status=&limit=&offset=)
+GET    /api/endpoints/:id/rules    # Transformation rules
+GET    /api/dlq                    # Dead letter queue
 ```
 
-## How the HealingAgent Works
+---
 
-1. **Receive** broken payload → validation fails
-2. **Fingerprint** the error pattern (schema + error types hash)
-3. **Cache lookup** → if rule exists and is active, apply it instantly
-4. **LLM generation** → Claude receives: expected schema + broken payload + validation errors
-5. **Sandbox execution** → AI script runs in isolated context (no network, no fs)
-6. **Re-validation** → healed output must pass the original Zod schema
-7. **Cache + persist** → rule stored for future events (24h cache TTL)
-8. **Auto-quarantine** → rules with < 30% success rate after 10 uses are quarantined
+## Destination config reference
 
-## Free Tier Limits
+### `supabase`
+```json
+{
+  "type": "supabase",
+  "tableName": "my_table",
+  "projectUrl": "https://other-project.supabase.co",  // optional override
+  "serviceKey": "eyJ..."                               // optional override
+}
+```
 
-| Service | Free Limit | Notes |
+### `webhook`
+```json
+{
+  "type": "webhook",
+  "url": "https://example.com/hook",
+  "method": "POST",
+  "wrapKey": "payload",       // optional: wraps body as { payload: <data> }
+  "headers": { "X-Foo": "bar" },
+  "retryOnFailure": true,
+  "timeoutMs": 5000
+}
+```
+
+### `http_api`
+```json
+{
+  "type": "http_api",
+  "url": "https://api.example.com/ingest",
+  "method": "POST",
+  "authType": "bearer",       // bearer | basic | api_key | none
+  "authValue": "token-here",
+  "authHeader": "X-Api-Key",  // only for authType=api_key (default: X-Api-Key)
+  "headers": {},
+  "timeoutMs": 5000
+}
+```
+
+---
+
+## Fanout behavior
+
+- All destinations are dispatched **concurrently** via `Promise.allSettled`
+- **Partial failure** → event is still marked `loaded`, response includes `dispatchResults` with per-destination status
+- **All fail** → event goes to DLQ (same as before)
+- Each `dispatchResults` entry contains: `destinationType`, `destinationIndex`, `success`, `durationMs`, `error?`
+
+---
+
+## Tech Stack
+
+| Layer | Service | Purpose |
 |---|---|---|
-| Cloudflare Workers | 100K req/day | More than enough for demo |
-| Cloudflare R2 | 10GB storage | DLQ payloads |
-| Supabase | 500MB DB, 2GB bandwidth | |
-| Upstash Redis | 10,000 req/day | Rule cache |
-| Upstash QStash | 10,000 messages/day | Event queue |
-| Resend | 3,000 emails/month | Notifications |
-| Anthropic | Pay-per-use | ~$0.003/healing call with Sonnet |
-
-## Roadmap
-
-- [ ] Dashboard UI (React + Supabase Realtime)
-- [ ] Multi-destination support (BigQuery, Webhook relay)
-- [ ] Rule editor UI (manual override/approval flow)
-- [ ] Tenant billing (Stripe integration)
-- [ ] WASM sandbox for stronger isolation
-- [ ] OpenTelemetry tracing
+| Worker | Cloudflare Workers | API Gateway, routing |
+| Database | Supabase (PostgreSQL) | Events, Endpoints, Rules, Auth |
+| Cache | Upstash Redis | Transformation rule cache (24h TTL) |
+| Storage | Cloudflare R2 | Dead Letter Queue payloads |
+| LLM | Anthropic Claude Sonnet | Generating transformation scripts |
+| Email | Resend | Healing & DLQ notifications |

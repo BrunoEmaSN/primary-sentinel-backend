@@ -1,8 +1,23 @@
-// src/infrastructure/adapters/database/SupabaseEventRepository.ts
+// src/infrastructure/adapters/database/SupabaseAdapters.ts
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { RawEvent } from "../../../domain/events/entities/RawEvent.js";
+import { Endpoint } from "../../../domain/events/entities/Endpoint.js";
+import { TransformationRule } from "../../../domain/healing/entities/TransformationRule.js";
 import type { IEventRepository } from "../../../domain/events/repositories/IEventRepository.js";
+import type { IEndpointRepository } from "../../../domain/events/repositories/IEndpointRepository.js";
+import type { ITransformationRuleRepository } from "../../../domain/healing/repositories/ITransformationRuleRepository.js";
 import type { EventStatus } from "../../../domain/events/entities/RawEvent.js";
+import type {
+  Destination,
+  HealingConfig,
+  EndpointStatus,
+  DestinationResult,
+} from "../../../domain/events/entities/Endpoint.js";
+import type { RuleLanguage, RuleStatus } from "../../../domain/healing/entities/TransformationRule.js";
+import { decryptDestinationsWithKey } from "../../utils/destinationSecretsCodec.js";
+
+// ── Event Repository ──────────────────────────────────────────────────────────
 
 export class SupabaseEventRepository implements IEventRepository {
   private client: SupabaseClient;
@@ -12,35 +27,31 @@ export class SupabaseEventRepository implements IEventRepository {
   }
 
   async save(event: RawEvent): Promise<void> {
-    const snapshot = event.toSnapshot();
+    const s = event.toSnapshot();
     const { error } = await this.client.from("events").insert({
-      id: snapshot["id"],
-      tenant_id: snapshot["tenantId"],
-      endpoint_id: snapshot["endpointId"],
-      raw_payload: snapshot["rawPayload"],
-      source: snapshot["source"],
-      metadata: snapshot["metadata"],
-      status: snapshot["status"],
-      validated_payload: snapshot["validatedPayload"],
-      healing_attempts: snapshot["healingAttempts"],
-      error_log: snapshot["errorLog"],
-      transformation_rule_id: snapshot["transformationRuleId"],
-      created_at: snapshot["createdAt"],
-      updated_at: snapshot["updatedAt"],
+      id: s["id"],
+      tenant_id: s["tenantId"],
+      endpoint_id: s["endpointId"],
+      raw_payload: s["rawPayload"],
+      source: s["source"],
+      metadata: s["metadata"],
+      status: s["status"],
+      validated_payload: s["validatedPayload"],
+      healing_attempts: s["healingAttempts"],
+      error_log: s["errorLog"],
+      transformation_rule_id: s["transformationRuleId"],
+      dispatch_results: s["dispatchResults"],
+      created_at: s["createdAt"],
+      updated_at: s["updatedAt"],
     });
-
     if (error) throw new DatabaseError(`Failed to save event: ${error.message}`);
   }
 
   async findById(id: string): Promise<RawEvent | null> {
     const { data, error } = await this.client
-      .from("events")
-      .select("*")
-      .eq("id", id)
-      .single();
-
+      .from("events").select("*").eq("id", id).single();
     if (error || !data) return null;
-    return this.hydrate(data);
+    return this.hydrateEvent(data as Record<string, unknown>);
   }
 
   async findByTenantAndEndpoint(params: {
@@ -56,51 +67,42 @@ export class SupabaseEventRepository implements IEventRepository {
       .eq("tenant_id", params.tenantId)
       .order("created_at", { ascending: false });
 
-    if (params.endpointId) {
-      query = query.eq("endpoint_id", params.endpointId);
-    }
-
-    if (params.status) query = query.eq("status", params.status);
-    if (params.limit) query = query.limit(params.limit);
-    if (params.offset) query = query.range(params.offset, params.offset + (params.limit ?? 20) - 1);
+    if (params.endpointId) query = query.eq("endpoint_id", params.endpointId);
+    if (params.status)     query = query.eq("status", params.status);
+    if (params.limit)      query = query.limit(params.limit);
+    if (params.offset)     query = query.range(params.offset, params.offset + (params.limit ?? 20) - 1);
 
     const { data, count, error } = await query;
     if (error) throw new DatabaseError(`Failed to query events: ${error.message}`);
 
     return {
-      events: (data ?? []).map(this.hydrate),
+      events: (data ?? []).map((r) => this.hydrateEvent(r as Record<string, unknown>)),
       total: count ?? 0,
     };
   }
 
   async updateStatus(event: RawEvent): Promise<void> {
-    const snapshot = event.toSnapshot();
-    const { error } = await this.client
-      .from("events")
-      .update({
-        status: snapshot["status"],
-        validated_payload: snapshot["validatedPayload"],
-        healing_attempts: snapshot["healingAttempts"],
-        error_log: snapshot["errorLog"],
-        transformation_rule_id: snapshot["transformationRuleId"],
-        updated_at: snapshot["updatedAt"],
-      })
-      .eq("id", event.id);
-
-    if (error) throw new DatabaseError(`Failed to update event status: ${error.message}`);
+    const s = event.toSnapshot();
+    const { error } = await this.client.from("events").update({
+      status: s["status"],
+      validated_payload: s["validatedPayload"],
+      healing_attempts: s["healingAttempts"],
+      error_log: s["errorLog"],
+      transformation_rule_id: s["transformationRuleId"],
+      dispatch_results: s["dispatchResults"],
+      updated_at: s["updatedAt"],
+    }).eq("id", event.id);
+    if (error) throw new DatabaseError(`Failed to update event: ${error.message}`);
   }
 
   async existsById(id: string): Promise<boolean> {
     const { count, error } = await this.client
-      .from("events")
-      .select("id", { count: "exact", head: true })
-      .eq("id", id);
-
-    if (error) throw new DatabaseError(`Failed to check event existence: ${error.message}`);
+      .from("events").select("id", { count: "exact", head: true }).eq("id", id);
+    if (error) throw new DatabaseError(`Failed to check event: ${error.message}`);
     return (count ?? 0) > 0;
   }
 
-  private hydrate(row: Record<string, unknown>): RawEvent {
+  private hydrateEvent(row: Record<string, unknown>): RawEvent {
     return RawEvent.reconstitute({
       id: row["id"] as string,
       tenantId: row["tenant_id"] as string,
@@ -113,40 +115,50 @@ export class SupabaseEventRepository implements IEventRepository {
       healingAttempts: row["healing_attempts"] as number,
       errorLog: (row["error_log"] as string[]) ?? [],
       transformationRuleId: (row["transformation_rule_id"] as string) ?? null,
+      dispatchResults: (row["dispatch_results"] as DestinationResult[]) ?? [],
       createdAt: new Date(row["created_at"] as string),
       updatedAt: new Date(row["updated_at"] as string),
     });
   }
 }
 
-// ── Endpoint Repository ─────────────────────────────────────────────────────
-
-import { Endpoint } from "../../../domain/events/entities/Endpoint.js";
-import type { IEndpointRepository } from "../../../domain/events/repositories/IEndpointRepository.js";
+// ── Endpoint Repository ───────────────────────────────────────────────────────
 
 export class SupabaseEndpointRepository implements IEndpointRepository {
   private client: SupabaseClient;
 
-  constructor(supabaseUrl: string, supabaseKey: string) {
+  constructor(
+    supabaseUrl: string,
+    supabaseKey: string,
+    private readonly destinationCryptoKey?: string
+  ) {
     this.client = createClient(supabaseUrl, supabaseKey);
   }
 
   async save(endpoint: Endpoint): Promise<void> {
     const s = endpoint.toSnapshot();
     const { error } = await this.client.from("endpoints").insert({
-      id: s["id"], tenant_id: s["tenantId"], name: s["name"], slug: s["slug"],
-      schema: s["schema"], destination: s["destination"],
-      healing_config: s["healingConfig"], status: s["status"],
-      stats: s["stats"], webhook_secret: endpoint.webhookSecret,
-      created_at: s["createdAt"], updated_at: s["updatedAt"],
+      id: s["id"],
+      tenant_id: s["tenantId"],
+      name: s["name"],
+      slug: s["slug"],
+      schema: s["schema"],
+      destinations: s["destinations"],
+      healing_config: s["healingConfig"],
+      status: s["status"],
+      stats: s["stats"],
+      webhook_secret: endpoint.webhookSecret,
+      created_at: s["createdAt"],
+      updated_at: s["updatedAt"],
     });
     if (error) throw new DatabaseError(`Failed to save endpoint: ${error.message}`);
   }
 
   async findById(id: string): Promise<Endpoint | null> {
-    const { data, error } = await this.client.from("endpoints").select("*").eq("id", id).single();
+    const { data, error } = await this.client
+      .from("endpoints").select("*").eq("id", id).single();
     if (error || !data) return null;
-    return this.hydrate(data);
+    return await this.hydrateEndpoint(data as Record<string, unknown>);
   }
 
   async findBySlug(params: { tenantId: string; slug: string }): Promise<Endpoint | null> {
@@ -156,20 +168,28 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
       .eq("slug", params.slug)
       .single();
     if (error || !data) return null;
-    return this.hydrate(data);
+    return await this.hydrateEndpoint(data as Record<string, unknown>);
   }
 
   async findByTenantId(tenantId: string): Promise<Endpoint[]> {
-    const { data, error } = await this.client.from("endpoints").select("*").eq("tenant_id", tenantId);
+    const { data, error } = await this.client
+      .from("endpoints").select("*").eq("tenant_id", tenantId);
     if (error) throw new DatabaseError(`Failed to list endpoints: ${error.message}`);
-    return (data ?? []).map(this.hydrate);
+    const rows = data ?? [];
+    const out: Endpoint[] = [];
+    for (const r of rows) {
+      out.push(await this.hydrateEndpoint(r as Record<string, unknown>));
+    }
+    return out;
   }
 
   async update(endpoint: Endpoint): Promise<void> {
     const s = endpoint.toSnapshot();
     const { error } = await this.client.from("endpoints").update({
-      status: s["status"], stats: s["stats"],
-      last_activity_at: s["lastActivityAt"], updated_at: s["updatedAt"],
+      status: s["status"],
+      stats: s["stats"],
+      last_activity_at: s["lastActivityAt"],
+      updated_at: s["updatedAt"],
     }).eq("id", endpoint.id);
     if (error) throw new DatabaseError(`Failed to update endpoint: ${error.message}`);
   }
@@ -179,32 +199,47 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
     if (error) throw new DatabaseError(`Failed to delete endpoint: ${error.message}`);
   }
 
-  private hydrate(row: Record<string, unknown>): Endpoint {
+  private async hydrateEndpoint(row: Record<string, unknown>): Promise<Endpoint> {
+    const stats = (row["stats"] as Record<string, number>) ?? {};
+    let destinations = this.resolveDestinations(row);
+    if (this.destinationCryptoKey) {
+      destinations = await decryptDestinationsWithKey(destinations, this.destinationCryptoKey);
+    }
     return Endpoint.reconstitute({
       id: row["id"] as string,
       tenantId: row["tenant_id"] as string,
       name: row["name"] as string,
       slug: row["slug"] as string,
       schema: row["schema"] as Record<string, unknown>,
-      destination: row["destination"] as import("../../../domain/events/entities/Endpoint.js").Destination,
-      healingConfig: row["healing_config"] as import("../../../domain/events/entities/Endpoint.js").HealingConfig,
-      status: row["status"] as import("../../../domain/events/entities/Endpoint.js").EndpointStatus,
-      totalEventsReceived: (row["stats"] as Record<string, number>)?.["total"] ?? 0,
-      totalEventsLoaded: (row["stats"] as Record<string, number>)?.["loaded"] ?? 0,
-      totalEventsHealed: (row["stats"] as Record<string, number>)?.["healed"] ?? 0,
-      totalEventsDead: (row["stats"] as Record<string, number>)?.["dead"] ?? 0,
-      lastActivityAt: row["last_activity_at"] ? new Date(row["last_activity_at"] as string) : null,
+      destinations,
+      healingConfig: row["healing_config"] as HealingConfig,
+      status: row["status"] as EndpointStatus,
+      totalEventsReceived: stats["total"] ?? 0,
+      totalEventsLoaded: stats["loaded"] ?? 0,
+      totalEventsHealed: stats["healed"] ?? 0,
+      totalEventsDead: stats["dead"] ?? 0,
+      lastActivityAt: row["last_activity_at"]
+        ? new Date(row["last_activity_at"] as string)
+        : null,
       webhookSecret: row["webhook_secret"] as string,
       createdAt: new Date(row["created_at"] as string),
       updatedAt: new Date(row["updated_at"] as string),
     });
   }
+
+  /** Backward-compatible: old rows have `destination` (object), new have `destinations` (array) */
+  private resolveDestinations(row: Record<string, unknown>): Destination[] {
+    if (Array.isArray(row["destinations"]) && row["destinations"].length > 0) {
+      return row["destinations"] as Destination[];
+    }
+    if (row["destination"] && typeof row["destination"] === "object") {
+      return [row["destination"] as Destination];
+    }
+    return [];
+  }
 }
 
-// ── Transformation Rule Repository ─────────────────────────────────────────
-
-import { TransformationRule } from "../../../domain/healing/entities/TransformationRule.js";
-import type { ITransformationRuleRepository } from "../../../domain/healing/repositories/ITransformationRuleRepository.js";
+// ── Transformation Rule Repository ───────────────────────────────────────────
 
 export class SupabaseTransformationRuleRepository implements ITransformationRuleRepository {
   private client: SupabaseClient;
@@ -219,8 +254,9 @@ export class SupabaseTransformationRuleRepository implements ITransformationRule
       id: s["id"], tenant_id: s["tenantId"], endpoint_id: s["endpointId"],
       schema_version: s["schemaVersion"], error_fingerprint: s["errorFingerprint"],
       language: s["language"], script: s["script"], description: s["description"],
-      status: s["status"], success_count: s["successCount"], failure_count: s["failureCount"],
-      last_used_at: s["lastUsedAt"], generated_by: s["generatedBy"],
+      status: s["status"], success_count: s["successCount"],
+      failure_count: s["failureCount"], last_used_at: s["lastUsedAt"],
+      generated_by: s["generatedBy"],
       created_at: s["createdAt"], updated_at: s["updatedAt"],
     });
     if (error) throw new DatabaseError(`Failed to save rule: ${error.message}`);
@@ -236,19 +272,21 @@ export class SupabaseTransformationRuleRepository implements ITransformationRule
       .eq("error_fingerprint", params.errorFingerprint)
       .eq("status", "active")
       .order("success_count", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1).single();
     if (error || !data) return null;
-    return this.hydrate(data);
+    return this.hydrateRule(data as Record<string, unknown>);
   }
 
   async findById(id: string): Promise<TransformationRule | null> {
-    const { data, error } = await this.client.from("transformation_rules").select("*").eq("id", id).single();
+    const { data, error } = await this.client
+      .from("transformation_rules").select("*").eq("id", id).single();
     if (error || !data) return null;
-    return this.hydrate(data);
+    return this.hydrateRule(data as Record<string, unknown>);
   }
 
-  async findByEndpoint(params: { tenantId: string; endpointId: string; limit?: number; }): Promise<TransformationRule[]> {
+  async findByEndpoint(params: {
+    tenantId: string; endpointId: string; limit?: number;
+  }): Promise<TransformationRule[]> {
     const { data, error } = await this.client
       .from("transformation_rules").select("*")
       .eq("tenant_id", params.tenantId)
@@ -256,29 +294,30 @@ export class SupabaseTransformationRuleRepository implements ITransformationRule
       .order("created_at", { ascending: false })
       .limit(params.limit ?? 50);
     if (error) throw new DatabaseError(`Failed to list rules: ${error.message}`);
-    return (data ?? []).map(this.hydrate);
+    return (data ?? []).map((r) => this.hydrateRule(r as Record<string, unknown>));
   }
 
   async update(rule: TransformationRule): Promise<void> {
     const s = rule.toSnapshot();
     const { error } = await this.client.from("transformation_rules").update({
       status: s["status"], success_count: s["successCount"],
-      failure_count: s["failureCount"], last_used_at: s["lastUsedAt"], updated_at: s["updatedAt"],
+      failure_count: s["failureCount"], last_used_at: s["lastUsedAt"],
+      updated_at: s["updatedAt"],
     }).eq("id", rule.id);
     if (error) throw new DatabaseError(`Failed to update rule: ${error.message}`);
   }
 
-  private hydrate(row: Record<string, unknown>): TransformationRule {
+  private hydrateRule(row: Record<string, unknown>): TransformationRule {
     return TransformationRule.reconstitute({
       id: row["id"] as string,
       tenantId: row["tenant_id"] as string,
       endpointId: row["endpoint_id"] as string,
       schemaVersion: row["schema_version"] as string,
       errorFingerprint: row["error_fingerprint"] as string,
-      language: row["language"] as import("../../../domain/healing/entities/TransformationRule.js").RuleLanguage,
+      language: row["language"] as RuleLanguage,
       script: row["script"] as string,
       description: row["description"] as string,
-      status: row["status"] as import("../../../domain/healing/entities/TransformationRule.js").RuleStatus,
+      status: row["status"] as RuleStatus,
       successCount: row["success_count"] as number,
       failureCount: row["failure_count"] as number,
       lastUsedAt: row["last_used_at"] ? new Date(row["last_used_at"] as string) : null,

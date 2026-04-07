@@ -1,7 +1,7 @@
 {
   "name": "sentinel-saas-backend",
-  "version": "1.0.0",
-  "description": "Self-healing AI-powered data pipeline sentinel",
+  "version": "2.0.0",
+  "description": "Self-Healing AI Data Pipeline — multi-destination fanout (webhook + http_api)",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -10,27 +10,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
-    "format": "prettier --write 'src/**/*.ts'"
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
     "@supabase/supabase-js": "^2.43.0",
     "@upstash/redis": "^1.28.0",
+    "jose": "^6.2.2",
+    "mysql2": "^3.20.0",
+    "postgres": "^3.4.9",
     "resend": "^3.2.0",
-    "typebox": "^0.0.1",
-    "zod": "^3.23.8",
-    "@upstash/qstash": "^2.7.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240524.0",
     "@types/node": "^20.14.0",
-    "@typescript-eslint/eslint-plugin": "^7.12.0",
-    "@typescript-eslint/parser": "^7.12.0",
     "@vitest/coverage-v8": "^4.1.2",
-    "eslint": "^8.57.0",
-    "prettier": "^3.3.0",
     "typescript": "^5.4.5",
     "vitest": "^4.1.2",
     "wrangler": "^4.80.0"

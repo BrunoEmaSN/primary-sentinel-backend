@@ -1,5 +1,4 @@
 // src/infrastructure/http/routes/index.ts
-// API Gateway router — maps HTTP requests to use cases
 
 import type { WorkerEnv, AuthContext } from "../middleware/auth.js";
 import {
@@ -23,21 +22,18 @@ import { createLogger } from "../../utils/logger.js";
 
 const logger = createLogger("Router");
 
-export async function handleRequest(
-  request: Request,
-  env: WorkerEnv
-): Promise<Response> {
+export async function handleRequest(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
 
-  // CORS preflight
   if (method === "OPTIONS") {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Sentinel-Signature",
+        "Access-Control-Allow-Headers":
+          "Authorization, Content-Type, X-Sentinel-Signature, X-Event-ID",
       },
     });
   }
@@ -45,57 +41,39 @@ export async function handleRequest(
   const deps = buildDependencies(env);
 
   try {
-    // ── Public: Webhook Receiver ─────────────────────────────────────────
-    // POST /webhook/:tenantId/:endpointSlug
+    // ── Public: webhook receiver ───────────────────────────────────────────
     if (method === "POST" && path.match(/^\/webhook\/[\w-]+\/[\w-]+$/)) {
       return await handleWebhook(request, url, env, deps);
     }
 
-    // ── Health Check ─────────────────────────────────────────────────────
+    // ── Health ─────────────────────────────────────────────────────────────
     if (path === "/health" && method === "GET") {
-      return jsonResponse({ status: "ok", version: "1.0.0", ts: new Date().toISOString() });
+      return jsonResponse({ status: "ok", version: "2.0.0", ts: new Date().toISOString() });
     }
 
-    // ── Protected API Routes (require JWT) ───────────────────────────────
+    // ── Protected routes ───────────────────────────────────────────────────
     const authResult = await authenticateRequest(request, env);
     if (authResult instanceof Response) return authResult;
     const auth = authResult as AuthContext;
 
-    // POST /api/endpoints — Create endpoint
     if (path === "/api/endpoints" && method === "POST") {
       return await handleCreateEndpoint(request, auth, deps, env);
     }
-
-    // GET /api/endpoints — List endpoints
     if (path === "/api/endpoints" && method === "GET") {
       return await handleListEndpoints(auth, deps);
     }
-
-    // GET /api/endpoints/:id — Get endpoint
     if (path.match(/^\/api\/endpoints\/[\w-]+$/) && method === "GET") {
-      const id = path.split("/").pop()!;
-      return await handleGetEndpoint(id, auth, deps);
+      return await handleGetEndpoint(path.split("/").pop()!, auth, deps);
     }
-
-    // DELETE /api/endpoints/:id — Delete endpoint
     if (path.match(/^\/api\/endpoints\/[\w-]+$/) && method === "DELETE") {
-      const id = path.split("/").pop()!;
-      return await handleDeleteEndpoint(id, auth, deps);
+      return await handleDeleteEndpoint(path.split("/").pop()!, auth, deps);
     }
-
-    // GET /api/endpoints/:id/events — List events for endpoint
     if (path.match(/^\/api\/endpoints\/[\w-]+\/events$/) && method === "GET") {
-      const id = path.split("/")[3]!;
-      return await handleListEvents(id, auth, url, deps);
+      return await handleListEvents(path.split("/")[3]!, auth, url, deps);
     }
-
-    // GET /api/endpoints/:id/rules — List transformation rules
     if (path.match(/^\/api\/endpoints\/[\w-]+\/rules$/) && method === "GET") {
-      const id = path.split("/")[3]!;
-      return await handleListRules(id, auth, deps);
+      return await handleListRules(path.split("/")[3]!, auth, deps);
     }
-
-    // GET /api/dlq — List DLQ items
     if (path === "/api/dlq" && method === "GET") {
       return await handleListDLQ(auth, url, deps);
     }
@@ -103,12 +81,11 @@ export async function handleRequest(
     return errorResponse("Not found", 404);
   } catch (e) {
     logger.error("Unhandled error", { error: e, path, method });
-    const message = e instanceof Error ? e.message : "Internal server error";
-    return errorResponse(message, 500);
+    return errorResponse(e instanceof Error ? e.message : "Internal server error", 500);
   }
 }
 
-// ── Route Handlers ───────────────────────────────────────────────────────────
+// ── Route handlers ────────────────────────────────────────────────────────────
 
 async function handleWebhook(
   request: Request,
@@ -119,18 +96,17 @@ async function handleWebhook(
   const [, , tenantId, endpointSlug] = url.pathname.split("/");
   if (!tenantId || !endpointSlug) return errorResponse("Invalid webhook URL", 400);
 
-  // Rate limiting: 1000 req/min per tenant
   const { allowed } = await checkRateLimit(env.RULE_CACHE, `webhook:${tenantId}`, 1000, 60);
   if (!allowed) return errorResponse("Rate limit exceeded", 429);
 
   const body = await request.text();
 
-  // Validate webhook signature if provided
+  // Optional signature verification
   const signature = request.headers.get("X-Sentinel-Signature");
   if (signature) {
     const endpoint = await deps.endpointRepo.findBySlug({ tenantId, slug: endpointSlug });
     if (endpoint) {
-      const valid = await validateWebhookSignature(request, body, endpoint.webhookSecret);
+      const valid = await validateWebhookSignature(request, body, endpoint.webhookSecret, signature);
       if (!valid) return unauthorizedResponse("Invalid webhook signature");
     }
   }
@@ -142,10 +118,13 @@ async function handleWebhook(
     return errorResponse("Invalid JSON payload", 400);
   }
 
-  // Generate idempotency key from content hash or use provided header
-  const eventId = request.headers.get("X-Event-ID") ??
+  const eventId =
+    request.headers.get("X-Event-ID") ??
     request.headers.get("X-Idempotency-Key") ??
     generateId();
+
+  const requestHeaders: Record<string, string> = {};
+  request.headers.forEach((value, key) => { requestHeaders[key] = value; });
 
   const useCase = new ProcessWebhookEvent(
     deps.eventRepo,
@@ -153,17 +132,11 @@ async function handleWebhook(
     deps.ruleRepo,
     deps.ruleCache,
     deps.llmService,
-    deps.queueService,
     deps.storageService,
     deps.notificationService,
-    deps.sandboxService
+    deps.sandboxService,
+    deps.outputDispatcher // NEW
   );
-  const requestHeaders: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    requestHeaders[key] = value;
-  });
-  const ipAddress = request.headers.get("CF-Connecting-IP");
-  const userAgent = request.headers.get("User-Agent");
 
   const result = await useCase.execute({
     eventId,
@@ -173,14 +146,13 @@ async function handleWebhook(
     metadata: {
       contentType: request.headers.get("Content-Type") ?? "application/json",
       headers: requestHeaders,
-      ...(ipAddress !== null ? { ipAddress } : {}),
-      ...(userAgent !== null ? { userAgent } : {}),
+      ...(request.headers.get("CF-Connecting-IP") ? { ipAddress: request.headers.get("CF-Connecting-IP")! } : {}),
+      ...(request.headers.get("User-Agent") ? { userAgent: request.headers.get("User-Agent")! } : {}),
     },
     origin: request.headers.get("Origin") ?? url.origin,
   });
 
-  const statusCode = result.status === "dead" ? 422 : 200;
-  return jsonResponse(result, statusCode);
+  return jsonResponse(result, result.status === "dead" ? 422 : 200);
 }
 
 async function handleCreateEndpoint(
@@ -191,35 +163,46 @@ async function handleCreateEndpoint(
 ): Promise<Response> {
   const body = await request.json() as Record<string, unknown>;
 
-  if (!body["name"] || !body["schema"] || !body["destination"]) {
-    return errorResponse("Missing required fields: name, schema, destination", 400);
+  if (!body["name"] || !body["schema"]) {
+    return errorResponse("Missing required fields: name, schema", 400);
   }
+
+  // Must have at least one of: destination (single) or destinations (array)
+  if (!body["destination"] && !body["destinations"]) {
+    return errorResponse("Missing required field: destination or destinations", 400);
+  }
+
+  const baseUrl =
+    env.ENVIRONMENT === "production"
+      ? "https://sentinel-saas-prod.yourworker.workers.dev"
+      : env.WORKER_URL;
 
   const useCase = new CreateEndpoint(
     deps.endpointRepo,
-    `https://${env.ENVIRONMENT === "production" ? "api.sentinel.yourdomain.com" : "sentinel-saas-dev.yourworker.workers.dev"}`
+    baseUrl,
+    env.SENTINEL_DESTINATION_SECRET_KEY
   );
-  const healingConfig = body["healingConfig"] as
-    Partial<import("../../../domain/events/entities/Endpoint.js").HealingConfig> |
-    undefined;
 
-  const result = await useCase.execute({
-    tenantId: auth.tenantId,
-    name: body["name"] as string,
-    schema: body["schema"] as Record<string, unknown>,
-    destination: body["destination"] as import("../../../domain/events/entities/Endpoint.js").Destination,
-    ...(healingConfig ? { healingConfig } : {}),
-  });
-
-  return jsonResponse(result, 201);
+  try {
+    const result = await useCase.execute({
+      tenantId: auth.tenantId,
+      name: body["name"] as string,
+      schema: body["schema"] as Record<string, unknown>,
+      ...(body["destination"]  ? { destination: body["destination"] as import("../../../domain/events/entities/Endpoint.js").Destination } : {}),
+      ...(body["destinations"] ? { destinations: body["destinations"] as import("../../../domain/events/entities/Endpoint.js").Destination[] } : {}),
+      ...(body["healingConfig"] ? { healingConfig: body["healingConfig"] as Partial<import("../../../domain/events/entities/Endpoint.js").HealingConfig> } : {}),
+    });
+    return jsonResponse(result, 201);
+  } catch (e) {
+    return errorResponse(e instanceof Error ? e.message : "Failed to create endpoint", 400);
+  }
 }
 
 async function handleListEndpoints(
   auth: AuthContext,
   deps: ReturnType<typeof buildDependencies>
 ): Promise<Response> {
-  const useCase = new ListEndpoints(deps.endpointRepo);
-  const endpoints = await useCase.execute(auth.tenantId);
+  const endpoints = await new ListEndpoints(deps.endpointRepo).execute(auth.tenantId);
   return jsonResponse({ data: endpoints, count: endpoints.length });
 }
 
@@ -228,8 +211,10 @@ async function handleGetEndpoint(
   auth: AuthContext,
   deps: ReturnType<typeof buildDependencies>
 ): Promise<Response> {
-  const useCase = new GetEndpoint(deps.endpointRepo);
-  const endpoint = await useCase.execute({ endpointId: id, tenantId: auth.tenantId });
+  const endpoint = await new GetEndpoint(deps.endpointRepo).execute({
+    endpointId: id,
+    tenantId: auth.tenantId,
+  });
   if (!endpoint) return errorResponse("Endpoint not found", 404);
   return jsonResponse(endpoint);
 }
@@ -239,8 +224,10 @@ async function handleDeleteEndpoint(
   auth: AuthContext,
   deps: ReturnType<typeof buildDependencies>
 ): Promise<Response> {
-  const useCase = new DeleteEndpoint(deps.endpointRepo);
-  await useCase.execute({ endpointId: id, tenantId: auth.tenantId });
+  await new DeleteEndpoint(deps.endpointRepo).execute({
+    endpointId: id,
+    tenantId: auth.tenantId,
+  });
   return jsonResponse({ deleted: true });
 }
 
@@ -250,14 +237,15 @@ async function handleListEvents(
   url: URL,
   deps: ReturnType<typeof buildDependencies>
 ): Promise<Response> {
-  const status = url.searchParams.get("status") as import("../../../domain/events/entities/RawEvent.js").EventStatus | undefined;
+  const status = url.searchParams.get("status") as
+    import("../../../domain/events/entities/RawEvent.js").EventStatus | null;
   const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
   const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
 
   const result = await deps.eventRepo.findByTenantAndEndpoint({
     tenantId: auth.tenantId,
     endpointId,
-    ...(status !== undefined ? { status } : {}),
+    ...(status ? { status } : {}),
     limit,
     offset,
   });
@@ -290,8 +278,8 @@ async function handleListDLQ(
 ): Promise<Response> {
   const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
   const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
-
   const endpointId = url.searchParams.get("endpointId");
+
   const result = await deps.eventRepo.findByTenantAndEndpoint({
     tenantId: auth.tenantId,
     ...(endpointId ? { endpointId } : {}),
@@ -300,8 +288,5 @@ async function handleListDLQ(
     offset,
   });
 
-  return jsonResponse({
-    data: result.events.map((e) => e.toSnapshot()),
-    total: result.total,
-  });
+  return jsonResponse({ data: result.events.map((e) => e.toSnapshot()), total: result.total });
 }

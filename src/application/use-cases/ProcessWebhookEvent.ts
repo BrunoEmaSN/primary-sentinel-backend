@@ -1,10 +1,13 @@
 // src/application/use-cases/ProcessWebhookEvent.ts
-// Main orchestrator: receives raw event → validates → heals if needed → loads
+// Main orchestrator: receive → validate → heal → dispatch to ALL destinations
 
 import { RawEvent } from "../../domain/events/entities/RawEvent.js";
 import type { IEventRepository } from "../../domain/events/repositories/IEventRepository.js";
 import type { IEndpointRepository } from "../../domain/events/repositories/IEndpointRepository.js";
-import type { ITransformationRuleRepository, IRuleCache } from "../../domain/healing/repositories/ITransformationRuleRepository.js";
+import type {
+  ITransformationRuleRepository,
+  IRuleCache,
+} from "../../domain/healing/repositories/ITransformationRuleRepository.js";
 import type {
   ILLMService,
   IStorageService,
@@ -12,7 +15,11 @@ import type {
   ISandboxService,
 } from "../ports/index.js";
 import { TransformationRule } from "../../domain/healing/entities/TransformationRule.js";
-import { generateId, hashFingerprint } from "../../infrastructure/utils/crypto.js";
+import { OutputDispatcher } from "./OutputDispatcher.js";
+import {
+  generateId,
+  hashFingerprint,
+} from "../../infrastructure/utils/crypto.js";
 import { createLogger } from "../../infrastructure/utils/logger.js";
 
 const logger = createLogger("ProcessWebhookEvent");
@@ -33,8 +40,16 @@ export type ProcessWebhookEventCommand = {
 
 export type ProcessWebhookEventResult = {
   eventId: string;
-  status: "loaded" | "healed" | "queued_for_healing" | "dead";
+  status: "loaded" | "healed" | "dead";
   message: string;
+  // NEW: per-destination dispatch summary
+  dispatchResults?: Array<{
+    destinationType: string;
+    destinationIndex: number;
+    success: boolean;
+    durationMs: number;
+    error?: string;
+  }>;
 };
 
 export class ProcessWebhookEvent {
@@ -46,7 +61,8 @@ export class ProcessWebhookEvent {
     private readonly llmService: ILLMService,
     private readonly storageService: IStorageService,
     private readonly notificationService: INotificationService,
-    private readonly sandboxService: ISandboxService
+    private readonly sandboxService: ISandboxService,
+    private readonly outputDispatcher: OutputDispatcher
   ) {}
 
   async execute(
@@ -58,28 +74,26 @@ export class ProcessWebhookEvent {
       endpointSlug: command.endpointSlug,
     });
 
-    // ── Step 0: Idempotency Guard ──────────────────────────────────────────
-    const alreadyProcessed = await this.eventRepo.existsById(command.eventId);
-    if (alreadyProcessed) {
-      logger.info("Duplicate event detected, skipping", { eventId: command.eventId });
-      return { eventId: command.eventId, status: "loaded", message: "Duplicate event — already processed" };
+    // ── Step 0: Idempotency guard ───────────────────────────────────────────
+    if (await this.eventRepo.existsById(command.eventId)) {
+      logger.info("Duplicate event, skipping", { eventId: command.eventId });
+      return {
+        eventId: command.eventId,
+        status: "loaded",
+        message: "Duplicate event — already processed",
+      };
     }
 
-    // ── Step 1: Load Endpoint Configuration ────────────────────────────────
+    // ── Step 1: Load endpoint ───────────────────────────────────────────────
     const endpoint = await this.endpointRepo.findBySlug({
       tenantId: command.tenantId,
       slug: command.endpointSlug,
     });
 
-    if (!endpoint) {
-      throw new EndpointNotFoundError(command.endpointSlug, command.tenantId);
-    }
+    if (!endpoint) throw new EndpointNotFoundError(command.endpointSlug, command.tenantId);
+    if (!endpoint.isActive()) throw new EndpointInactiveError(endpoint.id);
 
-    if (!endpoint.isActive()) {
-      throw new EndpointInactiveError(endpoint.id);
-    }
-
-    // ── Step 2: Persist Raw Event ──────────────────────────────────────────
+    // ── Step 2: Persist raw event ───────────────────────────────────────────
     const event = RawEvent.create({
       id: command.eventId,
       tenantId: command.tenantId,
@@ -98,21 +112,18 @@ export class ProcessWebhookEvent {
     endpoint.incrementReceived();
     await this.endpointRepo.update(endpoint);
 
-    // ── Step 3: DataValidator — Validate Against Schema ────────────────────
+    // ── Step 3: Validate against schema ────────────────────────────────────
     const zodSchema = endpoint.buildZodSchema();
     const validationResult = zodSchema.safeParse(command.rawPayload);
 
     if (validationResult.success) {
-      // ✅ FAST PATH: Valid data — load directly
-      logger.info("Validation passed, loading event", { eventId: event.id });
+      // ✅ Fast path — valid payload
       event.markAsValidated(validationResult.data);
       await this.eventRepo.updateStatus(event);
-
-      await this.loadEvent(event, endpoint);
-      return { eventId: event.id, status: "loaded", message: "Event validated and loaded successfully" };
+      return await this.dispatchAndFinalize(event, endpoint, validationResult.data, "loaded");
     }
 
-    // ── Step 4: HealingAgent — Try to fix broken data ──────────────────────
+    // ── Step 4: HealingAgent ────────────────────────────────────────────────
     const validationErrors = validationResult.error.errors.map(
       (e) => `${e.path.join(".")}: ${e.message}`
     );
@@ -133,7 +144,7 @@ export class ProcessWebhookEvent {
     event.markAsHealing();
     await this.eventRepo.updateStatus(event);
 
-    // Step 4A: Check cache for existing transformation rule
+    // Step 4A: Cache lookup
     const errorFingerprint = hashFingerprint(
       endpoint.id,
       JSON.stringify(endpoint.schema),
@@ -148,26 +159,30 @@ export class ProcessWebhookEvent {
 
       if (rule && rule.isUsable()) {
         const healed = await this.applyRule(rule, event);
-        if (healed) {
-          event.markAsHealed(healed, rule.id);
-          await this.eventRepo.updateStatus(event);
-          rule.recordSuccess();
-          await this.ruleRepo.update(rule);
-          await this.loadEvent(event, endpoint);
+        if (healed !== null) {
+          const healedValidation = zodSchema.safeParse(healed);
+          if (healedValidation.success) {
+            event.markAsHealed(healedValidation.data, rule.id);
+            await this.eventRepo.updateStatus(event);
+            rule.recordSuccess();
+            await this.ruleRepo.update(rule);
 
-          if (endpoint.healingConfig.notifyOnHealing) {
-            await this.notifyHealing(event, endpoint, rule, "cache_hit");
+            if (endpoint.healingConfig.notifyOnHealing) {
+              await this.notifyHealing(event, endpoint, rule, "cache_hit");
+            }
+
+            endpoint.incrementHealed();
+            await this.endpointRepo.update(endpoint);
+            return await this.dispatchAndFinalize(event, endpoint, healedValidation.data, "healed");
           }
-
-          return { eventId: event.id, status: "healed", message: "Event healed using cached rule" };
         }
         rule.recordFailure();
         await this.ruleRepo.update(rule);
       }
     }
 
-    // Step 4B: Generate new transformation rule via LLM
-    logger.info("Generating new transformation rule via LLM", { eventId: event.id });
+    // Step 4B: Generate via LLM
+    logger.info("Calling LLM for new transformation rule", { eventId: event.id });
 
     let healingResult;
     try {
@@ -177,31 +192,41 @@ export class ProcessWebhookEvent {
         validationErrors,
         endpointContext: `Endpoint: ${endpoint.name}`,
       });
-    } catch (llmError) {
-      logger.error("LLM failed to generate transformation", { error: llmError, eventId: event.id });
-      return await this.sendToDLQ(event, endpoint, `LLM generation failed: ${String(llmError)}`);
+    } catch (llmErr) {
+      logger.error("LLM failed", { error: llmErr, eventId: event.id });
+      return await this.sendToDLQ(
+        event,
+        endpoint,
+        `LLM generation failed: ${String(llmErr)}`
+      );
     }
 
-    // Step 4C: Execute in sandbox
+    // Step 4C: Sandbox execution
     const sandboxResult = await this.sandboxService.execute(
       healingResult.script,
       command.rawPayload
     );
 
     if (!sandboxResult.success) {
-      logger.error("Sandbox execution failed", { error: sandboxResult.error, eventId: event.id });
       event.addError(`Sandbox failed: ${sandboxResult.error}`);
-      return await this.sendToDLQ(event, endpoint, `Sandbox execution failed: ${sandboxResult.error}`);
+      return await this.sendToDLQ(
+        event,
+        endpoint,
+        `Sandbox execution failed: ${sandboxResult.error}`
+      );
     }
 
-    // Validate the sandbox output against the schema
+    // Step 4D: Re-validate healed output
     const healedValidation = zodSchema.safeParse(sandboxResult.output);
     if (!healedValidation.success) {
-      logger.error("Healed data still invalid after transformation", { eventId: event.id });
-      return await this.sendToDLQ(event, endpoint, "Transformed data still fails schema validation");
+      return await this.sendToDLQ(
+        event,
+        endpoint,
+        "Transformed data still fails schema validation"
+      );
     }
 
-    // ✅ Healing successful — persist rule
+    // ✅ Healing successful — persist new rule
     const newRule = TransformationRule.create({
       id: generateId(),
       tenantId: command.tenantId,
@@ -216,35 +241,71 @@ export class ProcessWebhookEvent {
 
     newRule.recordSuccess();
     await this.ruleRepo.save(newRule);
-    await this.ruleCache.set(errorFingerprint, newRule.id, 86400); // 24h TTL
+    await this.ruleCache.set(errorFingerprint, newRule.id, 86400);
 
     event.markAsHealed(healedValidation.data, newRule.id);
     await this.eventRepo.updateStatus(event);
     endpoint.incrementHealed();
     await this.endpointRepo.update(endpoint);
 
-    await this.loadEvent(event, endpoint);
-
     if (endpoint.healingConfig.notifyOnHealing) {
       await this.notifyHealing(event, endpoint, newRule, "llm_generated");
     }
 
-    logger.info("Event healed and loaded successfully", { eventId: event.id, ruleId: newRule.id });
-    return { eventId: event.id, status: "healed", message: "Event healed via AI-generated rule" };
+    logger.info("Event healed via LLM", { eventId: event.id, ruleId: newRule.id });
+    return await this.dispatchAndFinalize(event, endpoint, healedValidation.data, "healed");
   }
 
-  private async loadEvent(
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Dispatches validated payload to ALL destinations (fanout),
+   * marks event as loaded, updates stats, returns result.
+   */
+  private async dispatchAndFinalize(
     event: RawEvent,
-    endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint
-  ): Promise<void> {
-    // DataLoader: insert into destination DWH
-    // In production this would call the specific destination adapter
-    // For now, we mark as loaded and update stats
-    event.markAsLoaded();
+    endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint,
+    payload: unknown,
+    finalStatus: "loaded" | "healed"
+  ): Promise<ProcessWebhookEventResult> {
+    logger.info("Dispatching to destinations", {
+      eventId: event.id,
+      destinationCount: endpoint.destinations.length,
+    });
+
+    const dispatchResults = await this.outputDispatcher.dispatch(
+      endpoint.destinations,
+      payload
+    );
+
+    const allFailed = dispatchResults.length > 0 && dispatchResults.every((r) => !r.success);
+
+    if (allFailed) {
+      // All destinations failed — send to DLQ
+      const errors = dispatchResults.map((r) => r.error ?? "unknown").join("; ");
+      return await this.sendToDLQ(event, endpoint, `All destinations failed: ${errors}`);
+    }
+
+    // At least one destination succeeded — mark as loaded
+    event.markAsLoaded(dispatchResults);
     await this.eventRepo.updateStatus(event);
     endpoint.incrementLoaded();
     await this.endpointRepo.update(endpoint);
-    logger.info("Event loaded to destination", { eventId: event.id, destination: endpoint.destination.type });
+
+    const failedCount = dispatchResults.filter((r) => !r.success).length;
+    const message =
+      failedCount > 0
+        ? `Event ${finalStatus} — ${dispatchResults.length - failedCount}/${dispatchResults.length} destinations succeeded`
+        : `Event ${finalStatus} and dispatched to all ${dispatchResults.length} destination(s)`;
+
+    logger.info(message, { eventId: event.id });
+
+    return {
+      eventId: event.id,
+      status: finalStatus === "healed" ? "healed" : "loaded",
+      message,
+      dispatchResults,
+    };
   }
 
   private async applyRule(
@@ -265,20 +326,22 @@ export class ProcessWebhookEvent {
     endpoint.incrementDead();
     await this.endpointRepo.update(endpoint);
 
-    // Store raw payload in R2
-    const dlqKey = `dlq/${event.tenantId}/${event.id}.json`;
-    await this.storageService.store(dlqKey, event.toSnapshot());
+    await this.storageService
+      .store(`dlq/${event.tenantId}/${event.id}.json`, event.toSnapshot())
+      .catch((e) => logger.error("Failed to store DLQ payload", { error: e }));
 
     if (endpoint.healingConfig.notifyOnDead) {
-      await this.notificationService.send({
-        type: "dead_letter",
-        tenantId: event.tenantId,
-        endpointId: endpoint.id,
-        tenantEmail: "", // fetched from tenant record in production
-        endpointName: endpoint.name,
-        eventId: event.id,
-        details: { reason, errorLog: event.errorLog },
-      }).catch((e) => logger.error("Failed to send DLQ notification", { error: e }));
+      await this.notificationService
+        .send({
+          type: "dead_letter",
+          tenantId: event.tenantId,
+          endpointId: endpoint.id,
+          tenantEmail: "",
+          endpointName: endpoint.name,
+          eventId: event.id,
+          details: { reason, errorLog: event.errorLog },
+        })
+        .catch((e) => logger.error("Failed to send DLQ notification", { error: e }));
     }
 
     logger.error("Event sent to DLQ", { eventId: event.id, reason });
@@ -291,19 +354,21 @@ export class ProcessWebhookEvent {
     rule: TransformationRule,
     method: string
   ): Promise<void> {
-    await this.notificationService.send({
-      tenantId: event.tenantId,
-      endpointId: endpoint.id,
-      type: "healing_success",
-      tenantEmail: "",
-      endpointName: endpoint.name,
-      eventId: event.id,
-      details: { ruleId: rule.id, method, description: rule.description },
-    }).catch((e) => logger.error("Failed to send healing notification", { error: e }));
+    await this.notificationService
+      .send({
+        tenantId: event.tenantId,
+        endpointId: endpoint.id,
+        type: "healing_success",
+        tenantEmail: "",
+        endpointName: endpoint.name,
+        eventId: event.id,
+        details: { ruleId: rule.id, method, description: rule.description },
+      })
+      .catch((e) => logger.error("Failed to send healing notification", { error: e }));
   }
 }
 
-// ── Domain Errors ───────────────────────────────────────────────────────────
+// ── Domain errors ─────────────────────────────────────────────────────────────
 
 export class EndpointNotFoundError extends Error {
   constructor(slug: string, tenantId: string) {
