@@ -1,4 +1,19 @@
-# 🛡️ Sentinel SaaS v2 — Self-Healing AI Data Pipeline
+<div align="center">
+  <img width="1888" height="544" alt="primary-sentinel-background" src="https://github.com/user-attachments/assets/8775ec60-358e-4740-b5db-0fd5500d780f" />
+  <br />
+  <div>
+    <img src="https://img.shields.io/badge/-Google%20Cloud-black?style=for-the-badge&logo=googlecloud&color=000000" alt="google cloud" />
+    <img src="https://img.shields.io/badge/-Supabase-black?style=for-the-badge&logo=supabase&logoColor=3CC88B&color=000000" alt="supabase" />
+    <img src="https://img.shields.io/badge/-Cloudflare-black?style=for-the-badge&logo=cloudflare&logoColor=EB7D20&color=000000" alt="cloudflare" />
+    <img src="https://img.shields.io/badge/-Mysql-black?style=for-the-badge&logo=mysql&color=000000" alt="mysql" />
+    <img src="https://img.shields.io/badge/-Claude-black?style=for-the-badge&logo=claude&color=000000" alt="claude" />
+  </div>
+  
+  <h3 align="center">
+    <img width="15" height="15" alt="logo" src="https://github.com/user-attachments/assets/84318606-0d4d-4461-8bd3-1c11b746946a" />
+    PRIMARY SENTINEL BACKEND
+  </h3>
+</div>
 
 > Zero-downtime webhook integration that auto-detects, fixes, and learns from schema mutations.  
 > **v2 adds multi-destination fanout**: send validated payloads to Supabase + any webhook/API simultaneously.
