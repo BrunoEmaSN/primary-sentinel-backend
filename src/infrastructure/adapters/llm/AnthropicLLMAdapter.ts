@@ -1,4 +1,5 @@
 // src/infrastructure/adapters/llm/AnthropicLLMAdapter.ts
+
 import Anthropic from "@anthropic-ai/sdk";
 import type { ILLMService, HealingRequest, HealingResult } from "../../../application/ports/index.js";
 import { createLogger } from "../../utils/logger.js";
@@ -43,7 +44,6 @@ export class AnthropicLLMAdapter implements ILLMService {
 
   async generateTransformationScript(request: HealingRequest): Promise<HealingResult> {
     const userMessage = this.buildPrompt(request);
-
     logger.info("Calling Anthropic API for transformation generation");
 
     const response = await this.client.messages.create({
@@ -54,12 +54,11 @@ export class AnthropicLLMAdapter implements ILLMService {
     });
 
     const rawText = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => (block as { type: "text"; text: string }).text)
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
       .join("");
 
     logger.info("LLM response received", { usage: response.usage });
-
     return this.parseResponse(rawText);
   }
 
@@ -80,7 +79,6 @@ Generate a JavaScript transformation to fix the received payload into the expect
   }
 
   private parseResponse(rawText: string): HealingResult {
-    // Strip potential markdown code fences
     const cleaned = rawText
       .replace(/```json\n?/gi, "")
       .replace(/```\n?/gi, "")

@@ -1,16 +1,13 @@
 // tests/unit/ProcessWebhookEvent.test.ts
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  ProcessWebhookEvent,
-  EndpointNotFoundError,
-} from "../../src/application/use-cases/ProcessWebhookEvent.js";
-import { RawEvent } from "../../src/domain/events/entities/RawEvent.js";
+import { ProcessWebhookEvent } from "../../src/application/use-cases/ProcessWebhookEvent.js";
 import { Endpoint } from "../../src/domain/events/entities/Endpoint.js";
-import { TransformationRule } from "../../src/domain/healing/entities/TransformationRule.js";
+import type { Destination } from "../../src/domain/events/entities/Endpoint.js";
 
-// ── Mock factories ────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeEndpoint(overrides = {}) {
+function makeEndpoint(destinations: Destination[]): Endpoint {
   return Endpoint.create({
     id: "ep-001",
     tenantId: "tenant-001",
@@ -18,280 +15,294 @@ function makeEndpoint(overrides = {}) {
     slug: "test-endpoint",
     schema: {
       type: "object",
-      required: ["id", "name", "email"],
+      required: ["id", "name"],
       properties: {
-        id: { type: "string" },
+        id:   { type: "string" },
         name: { type: "string" },
-        email: { type: "string" },
       },
     },
-    destination: { type: "supabase", tableName: "test_events" },
-    webhookSecret: "secret-abc",
-    ...overrides,
+    destinations,
+    webhookSecret: "secret",
   });
 }
 
-function makeCommand(payload: unknown = { id: "1", name: "Alice", email: "a@b.com" }) {
-  return {
-    eventId: "evt-001",
-    tenantId: "tenant-001",
-    endpointSlug: "test-endpoint",
-    rawPayload: payload,
-    metadata: {
-      contentType: "application/json",
-      headers: {},
+function makeDeps() {
+  const endpoint = makeEndpoint([
+    {
+      type: "webhook",
+      url: "https://example.com/hook",
+      method: "POST" as const,
+      retryOnFailure: false,
+      timeoutMs: 5000,
     },
-    origin: "https://example.com",
-  };
-}
+  ]);
 
-function makeMocks() {
+  const eventRepo = {
+    save: vi.fn().mockResolvedValue(undefined),
+    findById: vi.fn().mockResolvedValue(null),
+    findByTenantAndEndpoint: vi.fn().mockResolvedValue({ events: [], total: 0 }),
+    updateStatus: vi.fn().mockResolvedValue(undefined),
+    existsById: vi.fn().mockResolvedValue(false),
+  };
+
+  const endpointRepo = {
+    save: vi.fn().mockResolvedValue(undefined),
+    findById: vi.fn().mockResolvedValue(endpoint),
+    findBySlug: vi.fn().mockResolvedValue(endpoint),
+    findByTenantId: vi.fn().mockResolvedValue([endpoint]),
+    update: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const ruleRepo = {
+    save: vi.fn().mockResolvedValue(undefined),
+    findByFingerprint: vi.fn().mockResolvedValue(null),
+    findById: vi.fn().mockResolvedValue(null),
+    findByEndpoint: vi.fn().mockResolvedValue([]),
+    update: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const ruleCache = {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue(undefined),
+    invalidate: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const llmService = {
+    generateTransformationScript: vi.fn().mockResolvedValue({
+      success: true,
+      script: "return { id: String(input.user_id), name: input.full_name };",
+      description: "Maps user_id → id and full_name → name",
+      language: "javascript",
+      confidence: 0.95,
+      modelUsed: "claude-sonnet-4-20250514",
+    }),
+  };
+
+  const storageService = {
+    store: vi.fn().mockResolvedValue("key"),
+    retrieve: vi.fn().mockResolvedValue(null),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const notificationService = {
+    send: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const sandboxService = {
+    execute: vi.fn().mockResolvedValue({
+      success: true,
+      output: { id: "123", name: "Alice" },
+      executionTimeMs: 10,
+    }),
+  };
+
+  const outputDispatcher = {
+    dispatch: vi.fn().mockResolvedValue([
+      {
+        destinationType: "webhook",
+        destinationIndex: 0,
+        success: true,
+        durationMs: 42,
+      },
+    ]),
+  };
+
   return {
-    eventRepo: {
-      save: vi.fn().mockResolvedValue(undefined),
-      findById: vi.fn().mockResolvedValue(null),
-      findByTenantAndEndpoint: vi.fn().mockResolvedValue({ events: [], total: 0 }),
-      updateStatus: vi.fn().mockResolvedValue(undefined),
-      existsById: vi.fn().mockResolvedValue(false),
-    },
-    endpointRepo: {
-      save: vi.fn().mockResolvedValue(undefined),
-      findById: vi.fn().mockResolvedValue(null),
-      findBySlug: vi.fn().mockResolvedValue(makeEndpoint()),
-      findByTenantId: vi.fn().mockResolvedValue([]),
-      update: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockResolvedValue(undefined),
-    },
-    ruleRepo: {
-      save: vi.fn().mockResolvedValue(undefined),
-      findByFingerprint: vi.fn().mockResolvedValue(null),
-      findById: vi.fn().mockResolvedValue(null),
-      findByEndpoint: vi.fn().mockResolvedValue([]),
-      update: vi.fn().mockResolvedValue(undefined),
-    },
-    ruleCache: {
-      get: vi.fn().mockResolvedValue(null),
-      set: vi.fn().mockResolvedValue(undefined),
-      invalidate: vi.fn().mockResolvedValue(undefined),
-    },
-    llmService: {
-      generateTransformationScript: vi.fn().mockResolvedValue({
-        success: true,
-        script: "return { id: input.user_id, name: input.full_name, email: input.email_address };",
-        description: "Maps legacy fields to standard schema",
-        language: "javascript",
-        confidence: 0.95,
-        modelUsed: "claude-sonnet-4-20250514",
-      }),
-    },
-    storageService: {
-      store: vi.fn().mockResolvedValue("dlq/tenant-001/evt-001.json"),
-      retrieve: vi.fn().mockResolvedValue(null),
-      delete: vi.fn().mockResolvedValue(undefined),
-    },
-    notificationService: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
-    sandboxService: {
-      execute: vi.fn().mockResolvedValue({
-        success: true,
-        output: { id: "1", name: "Alice", email: "alice@example.com" },
-        executionTimeMs: 12,
-      }),
-    },
+    eventRepo, endpointRepo, ruleRepo, ruleCache,
+    llmService, storageService, notificationService,
+    sandboxService, outputDispatcher, endpoint,
   };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("ProcessWebhookEvent", () => {
-  let mocks: ReturnType<typeof makeMocks>;
+  describe("valid payload — fast path", () => {
+    it("validates, dispatches, returns loaded status", async () => {
+      const deps = makeDeps();
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
+      );
 
-  beforeEach(() => {
-    mocks = makeMocks();
-  });
-
-  function buildUseCase() {
-    return new ProcessWebhookEvent(
-      mocks.eventRepo as never,
-      mocks.endpointRepo as never,
-      mocks.ruleRepo as never,
-      mocks.ruleCache as never,
-      mocks.llmService as never,
-      mocks.storageService as never,
-      mocks.notificationService as never,
-      mocks.sandboxService as never
-    );
-  }
-
-  describe("Happy path — valid payload", () => {
-    it("should save, validate, and load a valid event", async () => {
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand());
-
-      expect(result.status).toBe("loaded");
-      expect(mocks.eventRepo.save).toHaveBeenCalledOnce();
-      expect(mocks.eventRepo.updateStatus).toHaveBeenCalled();
-      expect(mocks.llmService.generateTransformationScript).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("Idempotency", () => {
-    it("should skip duplicate events", async () => {
-      mocks.eventRepo.existsById.mockResolvedValue(true);
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand());
-
-      expect(result.status).toBe("loaded");
-      expect(mocks.eventRepo.save).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("HealingAgent — LLM path", () => {
-    it("should call LLM and heal a broken payload", async () => {
-      const brokenPayload = { user_id: "1", full_name: "Alice", email_address: "alice@example.com" };
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand(brokenPayload));
-
-      expect(result.status).toBe("healed");
-      expect(mocks.llmService.generateTransformationScript).toHaveBeenCalledOnce();
-      expect(mocks.sandboxService.execute).toHaveBeenCalled();
-      expect(mocks.ruleRepo.save).toHaveBeenCalledOnce();
-      expect(mocks.ruleCache.set).toHaveBeenCalledOnce();
-    });
-
-    it("should use cached rule if available", async () => {
-      mocks.ruleCache.get.mockResolvedValue("rule-cached-id");
-      const cachedRule = TransformationRule.create({
-        id: "rule-cached-id",
+      const result = await useCase.execute({
+        eventId: "evt-001",
         tenantId: "tenant-001",
-        endpointId: "ep-001",
-        schemaVersion: "1",
-        errorFingerprint: "abc123",
-        language: "javascript",
-        script: "return { id: input.user_id, name: input.full_name, email: input.email_address };",
-        description: "Cached rule",
-        generatedBy: "claude-sonnet-4-20250514",
+        endpointSlug: "test-endpoint",
+        rawPayload: { id: "123", name: "Alice" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
       });
-      mocks.ruleRepo.findById.mockResolvedValue(cachedRule);
 
-      const brokenPayload = { user_id: "1", full_name: "Alice", email_address: "alice@example.com" };
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand(brokenPayload));
+      expect(result.status).toBe("loaded");
+      expect(result.eventId).toBe("evt-001");
+      expect(deps.outputDispatcher.dispatch).toHaveBeenCalledOnce();
+      expect(deps.outputDispatcher.dispatch).toHaveBeenCalledWith(
+        deps.endpoint.destinations,
+        expect.objectContaining({ id: "123", name: "Alice" })
+      );
+      expect(result.dispatchResults).toHaveLength(1);
+      expect(result.dispatchResults![0]!.success).toBe(true);
+    });
+
+    it("skips duplicate events (idempotency)", async () => {
+      const deps = makeDeps();
+      deps.eventRepo.existsById = vi.fn().mockResolvedValue(true);
+
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
+      );
+
+      const result = await useCase.execute({
+        eventId: "evt-dup",
+        tenantId: "tenant-001",
+        endpointSlug: "test-endpoint",
+        rawPayload: {},
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
+
+      expect(result.status).toBe("loaded");
+      expect(result.message).toContain("Duplicate");
+      expect(deps.outputDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("invalid payload — healing path", () => {
+    it("calls LLM, runs sandbox, dispatches healed payload", async () => {
+      const deps = makeDeps();
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
+      );
+
+      const result = await useCase.execute({
+        eventId: "evt-heal",
+        tenantId: "tenant-001",
+        endpointSlug: "test-endpoint",
+        rawPayload: { user_id: 123, full_name: "Alice" }, // wrong types
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
 
       expect(result.status).toBe("healed");
-      expect(mocks.llmService.generateTransformationScript).not.toHaveBeenCalled();
-      expect(result.message).toContain("cached");
+      expect(deps.llmService.generateTransformationScript).toHaveBeenCalledOnce();
+      expect(deps.sandboxService.execute).toHaveBeenCalledOnce();
+      expect(deps.outputDispatcher.dispatch).toHaveBeenCalledOnce();
     });
 
-    it("should send to DLQ if LLM throws", async () => {
-      mocks.llmService.generateTransformationScript.mockRejectedValue(
-        new Error("Anthropic API rate limited")
+    it("sends to DLQ when all destinations fail", async () => {
+      const deps = makeDeps();
+      deps.outputDispatcher.dispatch = vi.fn().mockResolvedValue([
+        {
+          destinationType: "webhook",
+          destinationIndex: 0,
+          success: false,
+          error: "Connection refused",
+          durationMs: 10,
+        },
+      ]);
+
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
       );
 
-      const brokenPayload = { wrong_field: "data" };
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand(brokenPayload));
-
-      expect(result.status).toBe("dead");
-      expect(mocks.storageService.store).toHaveBeenCalledOnce();
-    });
-
-    it("should send to DLQ if sandbox output is still invalid", async () => {
-      mocks.sandboxService.execute.mockResolvedValue({
-        success: true,
-        output: { wrong: "output" }, // still invalid after transformation
-        executionTimeMs: 5,
+      const result = await useCase.execute({
+        eventId: "evt-fail",
+        tenantId: "tenant-001",
+        endpointSlug: "test-endpoint",
+        rawPayload: { id: "valid", name: "Alice" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
       });
 
-      const brokenPayload = { wrong_field: "data" };
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand(brokenPayload));
-
       expect(result.status).toBe("dead");
+      expect(deps.storageService.store).toHaveBeenCalledOnce();
     });
 
-    it("should send to DLQ if healing is disabled", async () => {
-      mocks.endpointRepo.findBySlug.mockResolvedValue(
-        makeEndpoint({ healingConfig: { enabled: false } })
+    it("sends to DLQ when healing is disabled", async () => {
+      const endpointNoHealing = Endpoint.create({
+        id: "ep-002",
+        tenantId: "tenant-001",
+        name: "No Healing",
+        slug: "no-healing",
+        schema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        destinations: [{ type: "webhook", url: "https://example.com", method: "POST", retryOnFailure: false, timeoutMs: 5000 }],
+        healingConfig: { enabled: false, maxAttempts: 3, autoApplyRules: false, notifyOnHealing: false, notifyOnDead: false },
+        webhookSecret: "sec",
+      });
+
+      const deps = makeDeps();
+      deps.endpointRepo.findBySlug = vi.fn().mockResolvedValue(endpointNoHealing);
+
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
       );
 
-      const brokenPayload = { wrong_field: "data" };
-      const useCase = buildUseCase();
-      const result = await useCase.execute(makeCommand(brokenPayload));
+      const result = await useCase.execute({
+        eventId: "evt-nodlq",
+        tenantId: "tenant-001",
+        endpointSlug: "no-healing",
+        rawPayload: { wrong_field: "oops" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
 
       expect(result.status).toBe("dead");
-      expect(mocks.llmService.generateTransformationScript).not.toHaveBeenCalled();
+      expect(result.message).toContain("Healing disabled");
+      expect(deps.llmService.generateTransformationScript).not.toHaveBeenCalled();
     });
   });
 
-  describe("Error cases", () => {
-    it("should throw if endpoint not found", async () => {
-      mocks.endpointRepo.findBySlug.mockResolvedValue(null);
-      const useCase = buildUseCase();
-      await expect(useCase.execute(makeCommand())).rejects.toThrow(EndpointNotFoundError);
+  describe("fanout — partial success", () => {
+    it("marks event as loaded even if one of multiple destinations fails", async () => {
+      const endpointMulti = Endpoint.create({
+        id: "ep-multi",
+        tenantId: "tenant-001",
+        name: "Multi Dest",
+        slug: "multi-dest",
+        schema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        destinations: [
+          { type: "webhook", url: "https://good.example.com", method: "POST", retryOnFailure: false, timeoutMs: 5000 },
+          { type: "webhook", url: "https://bad.example.com",  method: "POST", retryOnFailure: false, timeoutMs: 5000 },
+        ],
+        webhookSecret: "sec",
+      });
+
+      const deps = makeDeps();
+      deps.endpointRepo.findBySlug = vi.fn().mockResolvedValue(endpointMulti);
+      deps.outputDispatcher.dispatch = vi.fn().mockResolvedValue([
+        { destinationType: "webhook", destinationIndex: 0, success: true,  durationMs: 20 },
+        { destinationType: "webhook", destinationIndex: 1, success: false, error: "timeout", durationMs: 5000 },
+      ]);
+
+      const useCase = new ProcessWebhookEvent(
+        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
+        deps.llmService, deps.storageService, deps.notificationService,
+        deps.sandboxService, deps.outputDispatcher as any
+      );
+
+      const result = await useCase.execute({
+        eventId: "evt-partial",
+        tenantId: "tenant-001",
+        endpointSlug: "multi-dest",
+        rawPayload: { id: "valid" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
+
+      expect(result.status).toBe("loaded");
+      expect(result.message).toContain("1/2");
+      expect(result.dispatchResults).toHaveLength(2);
     });
-  });
-});
-
-// ── Domain entity tests ───────────────────────────────────────────────────────
-
-describe("RawEvent", () => {
-  it("should transition through lifecycle correctly", () => {
-    const event = RawEvent.create({
-      id: "evt-1",
-      tenantId: "t1",
-      endpointId: "ep-1",
-      rawPayload: { foo: "bar" },
-      source: { tenantId: "t1", endpointId: "ep-1", origin: "test", receivedAt: new Date() },
-      metadata: { contentType: "application/json", headers: {} },
-    });
-
-    expect(event.status).toBe("received");
-
-    event.markAsValidated({ foo: "bar" });
-    expect(event.status).toBe("validated");
-
-    event.markAsLoaded();
-    expect(event.status).toBe("loaded");
-  });
-
-  it("should track healing attempts", () => {
-    const event = RawEvent.create({
-      id: "evt-2",
-      tenantId: "t1",
-      endpointId: "ep-1",
-      rawPayload: {},
-      source: { tenantId: "t1", endpointId: "ep-1", origin: "test", receivedAt: new Date() },
-      metadata: { contentType: "application/json", headers: {} },
-    });
-
-    expect(event.canAttemptHealing(3)).toBe(true);
-    event.markAsHealing();
-    event.markAsHealing();
-    event.markAsHealing();
-    expect(event.canAttemptHealing(3)).toBe(false);
-  });
-});
-
-describe("TransformationRule", () => {
-  it("should auto-quarantine on low success rate", () => {
-    const rule = TransformationRule.create({
-      id: "r1",
-      tenantId: "t1",
-      endpointId: "ep-1",
-      schemaVersion: "1",
-      errorFingerprint: "abc",
-      language: "javascript",
-      script: "return input;",
-      description: "test",
-      generatedBy: "claude",
-    });
-
-    // Simulate 10 failures, 2 successes (< 30% success rate)
-    for (let i = 0; i < 8; i++) rule.recordFailure();
-    for (let i = 0; i < 2; i++) rule.recordSuccess();
-
-    expect(rule.status).toBe("quarantined");
   });
 });

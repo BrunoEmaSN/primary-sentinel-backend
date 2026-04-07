@@ -6,12 +6,11 @@ export interface IEventRepository {
   findById(id: string): Promise<RawEvent | null>;
   findByTenantAndEndpoint(params: {
     tenantId: string;
-    /** Si falta, se listan eventos de todos los endpoints del tenant. */
     endpointId?: string;
     status?: EventStatus;
     limit?: number;
     offset?: number;
   }): Promise<{ events: RawEvent[]; total: number }>;
   updateStatus(event: RawEvent): Promise<void>;
-  existsById(id: string): Promise<boolean>; // idempotency check
+  existsById(id: string): Promise<boolean>;
 }

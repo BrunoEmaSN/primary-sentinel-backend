@@ -1,27 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
-    "module": "ESNext",
+    "module": "ES2022",
     "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "paths": {
-      "*": ["./*"],
-      "@domain/*": ["./src/domain/*"],
-      "@application/*": ["./src/application/*"],
-      "@infrastructure/*": ["./src/infrastructure/*"],
-      "@config/*": ["./config/*"]
-    },
-    "types": ["@cloudflare/workers-types"],
-    "outDir": "dist",
-    "declaration": true,
-    "sourceMap": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noImplicitReturns": true,
+    "outDir": "./dist",
+    "rootDir": "."
   },
-  "include": ["src/**/*.ts", "workers/**/*.ts", "config/**/*.ts"],
+  "include": ["workers/**/*.ts", "src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

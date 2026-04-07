@@ -17,9 +17,8 @@ export interface ITransformationRuleRepository {
   update(rule: TransformationRule): Promise<void>;
 }
 
-// src/domain/healing/repositories/IRuleCache.ts
 export interface IRuleCache {
-  get(fingerprint: string): Promise<string | null>; // returns ruleId
+  get(fingerprint: string): Promise<string | null>;
   set(fingerprint: string, ruleId: string, ttlSeconds?: number): Promise<void>;
   invalidate(fingerprint: string): Promise<void>;
 }
