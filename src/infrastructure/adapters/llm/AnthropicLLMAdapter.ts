@@ -6,7 +6,7 @@ import { createLogger } from "../../utils/logger.js";
 
 const logger = createLogger("AnthropicLLMAdapter");
 
-const SYSTEM_PROMPT = `You are SentinelAI, an expert data transformation engine.
+const SYSTEM_PROMPT = `You are Primary Sentinel, an expert data transformation engine.
 Your task is to analyze a broken API payload and generate a JavaScript transformation function
 that converts the received payload into the expected schema format.
 

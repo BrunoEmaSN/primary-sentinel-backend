@@ -96,10 +96,10 @@ export class ResendNotificationService implements INotificationService {
     switch (payload.type) {
       case "healing_success":
         return {
-          subject: `✅ Sentinel: API mutation auto-healed — ${payload.endpointName}`,
+          subject: `✅ Primary Sentinel: API mutation auto-healed — ${payload.endpointName}`,
           html: `
             <h2>🔧 Auto-Healing Successful</h2>
-            <p>Sentinel auto-fixed a schema mutation on <strong>${payload.endpointName}</strong>.</p>
+            <p>Primary Sentinel auto-fixed a schema mutation on <strong>${payload.endpointName}</strong>.</p>
             <ul>
               <li><strong>Event ID:</strong> ${payload.eventId}</li>
               <li><strong>Rule ID:</strong> ${payload.details["ruleId"]}</li>
@@ -110,10 +110,10 @@ export class ResendNotificationService implements INotificationService {
         };
       case "dead_letter":
         return {
-          subject: `🚨 ALERT: Sentinel — Unrecoverable event on ${payload.endpointName}`,
+          subject: `🚨 ALERT: Primary Sentinel — Unrecoverable event on ${payload.endpointName}`,
           html: `
             <h2>💀 Dead Letter Alert</h2>
-            <p>Sentinel could not fix an event on <strong>${payload.endpointName}</strong>.</p>
+            <p>Primary Sentinel could not fix an event on <strong>${payload.endpointName}</strong>.</p>
             <ul>
               <li><strong>Event ID:</strong> ${payload.eventId}</li>
               <li><strong>Reason:</strong> ${payload.details["reason"]}</li>
@@ -123,7 +123,7 @@ export class ResendNotificationService implements INotificationService {
         };
       case "rule_quarantined":
         return {
-          subject: `⚠️ Sentinel: Rule quarantined — ${payload.endpointName}`,
+          subject: `⚠️ Primary Sentinel: Rule quarantined — ${payload.endpointName}`,
           html: `
             <h2>⚠️ Rule Quarantined</h2>
             <p>Rule ${payload.details["ruleId"]} quarantined (success rate: ${payload.details["successRate"]}).</p>
@@ -131,7 +131,7 @@ export class ResendNotificationService implements INotificationService {
         };
       default:
         return {
-          subject: `Sentinel Notification — ${payload.type}`,
+          subject: `Primary Sentinel Notification — ${payload.type}`,
           html: `<pre>${JSON.stringify(payload, null, 2)}</pre>`,
         };
     }
