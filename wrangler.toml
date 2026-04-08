@@ -35,10 +35,6 @@ vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://s
 # binding = "HYPERDRIVE"
 # id = "your-hyperdrive-config-id"
 
-[limits]
-# BigQuery + SQL dispatch may need more CPU; raise if you see 1102 errors.
-cpu_ms = 50
-
 [[rules]]
 type = "ESModule"
 globs = ["**/*.ts"]
