@@ -8,8 +8,8 @@ vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug", WORKER_URL = "http://
 
 [[kv_namespaces]]
 binding = "RULE_CACHE"
-id = "REPLACE_WITH_YOUR_KV_ID"
-preview_id = "REPLACE_WITH_YOUR_KV_PREVIEW_ID"
+id = "f66be187e4f54bc2a5325c20c29490b2"
+preview_id = "c9a95b19ba034127ad9a667249442778"
 
 [[r2_buckets]]
 binding = "DLQ_BUCKET"
