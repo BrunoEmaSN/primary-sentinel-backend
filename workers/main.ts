@@ -27,11 +27,11 @@ export default {
 
     try {
       if (request.method === "OPTIONS") {
-        return preflightResponse(request);
+        return preflightResponse(request, env);
       }
 
       const response = await handleRequest(request, env);
-      const withCorsHeaders = withCors(response, request);
+      const withCorsHeaders = withCors(response, request, env);
       const headers = new Headers(withCorsHeaders.headers);
       headers.set("X-Response-Time", `${Date.now() - start}ms`);
 
@@ -50,7 +50,7 @@ export default {
         error: error instanceof Error ? error.message : String(error),
         path: url.pathname,
       });
-      return jsonErrorWithCors(request, { error: "Internal server error" }, 500);
+      return jsonErrorWithCors(request, { error: "Internal server error" }, 500, env);
     }
   },
 

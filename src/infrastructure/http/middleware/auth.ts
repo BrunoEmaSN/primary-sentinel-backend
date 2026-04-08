@@ -26,6 +26,8 @@ export type WorkerEnv = {
   ENVIRONMENT: string;
   LOG_LEVEL: string;
   WORKER_URL: string;
+  /** Comma-separated exact origins for CORS (e.g. https://app.vercel.app). Empty/absent = permissive dev behavior. */
+  ALLOWED_ORIGINS?: string;
 };
 
 export async function authenticateRequest(

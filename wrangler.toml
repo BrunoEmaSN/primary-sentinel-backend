@@ -16,9 +16,11 @@ binding = "DLQ_BUCKET"
 bucket_name = "sentinel-dlq"
 preview_bucket_name = "sentinel-dlq-preview"
 
+# Production CORS: ALLOWED_ORIGINS must list every browser origin that calls this Worker (comma-separated, exact https URLs).
+# Align with NEXT_PUBLIC_SITE_URL on Vercel. Each Vercel preview URL needs its own entry unless you use a single custom domain.
 [env.production]
 name = "sentinel-saas-prod"
-vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev" }
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app" }
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
