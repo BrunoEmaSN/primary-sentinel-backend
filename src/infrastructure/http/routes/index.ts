@@ -27,17 +27,6 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   const path = url.pathname;
   const method = request.method;
 
-  if (method === "OPTIONS") {
-    return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Authorization, Content-Type, X-Sentinel-Signature, X-Event-ID",
-      },
-    });
-  }
-
   const deps = buildDependencies(env);
 
   try {

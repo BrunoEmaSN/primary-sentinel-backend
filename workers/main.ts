@@ -4,6 +4,11 @@ import { handleRequest } from "../src/infrastructure/http/routes/index.js";
 import type { WorkerEnv } from "../src/infrastructure/http/middleware/auth.js";
 import { resetDependencies } from "../src/infrastructure/container.js";
 import { createLogger } from "../src/infrastructure/utils/logger.js";
+import {
+  preflightResponse,
+  withCors,
+  jsonErrorWithCors,
+} from "../src/infrastructure/http/cors.js";
 
 const logger = createLogger("Worker");
 
@@ -21,13 +26,13 @@ export default {
     });
 
     try {
-      const response = await handleRequest(request, env);
+      if (request.method === "OPTIONS") {
+        return preflightResponse(request);
+      }
 
-      const headers = new Headers(response.headers);
-      headers.set("Access-Control-Allow-Origin", "*");
-      headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      headers.set("Access-Control-Allow-Headers",
-        "Authorization, Content-Type, X-Sentinel-Signature, X-Event-ID");
+      const response = await handleRequest(request, env);
+      const withCorsHeaders = withCors(response, request);
+      const headers = new Headers(withCorsHeaders.headers);
       headers.set("X-Response-Time", `${Date.now() - start}ms`);
 
       logger.info("Request completed", {
@@ -35,16 +40,17 @@ export default {
         durationMs: Date.now() - start,
       });
 
-      return new Response(response.body, { status: response.status, headers });
+      return new Response(withCorsHeaders.body, {
+        status: withCorsHeaders.status,
+        statusText: withCorsHeaders.statusText,
+        headers,
+      });
     } catch (error) {
       logger.error("Unhandled worker error", {
         error: error instanceof Error ? error.message : String(error),
         path: url.pathname,
       });
-      return new Response(
-        JSON.stringify({ error: "Internal server error" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return jsonErrorWithCors(request, { error: "Internal server error" }, 500);
     }
   },
 
