@@ -40,6 +40,10 @@ export type NotificationPayload = {
   endpointName: string;
   eventId: string;
   details: Record<string, unknown>;
+  /** HTML completo (p. ej. desde incident summary unificado). */
+  htmlBody?: string;
+  /** JSON del resumen unificado para auditoría / webhook. */
+  incidentSummary?: Record<string, unknown>;
 };
 
 export interface INotificationService {

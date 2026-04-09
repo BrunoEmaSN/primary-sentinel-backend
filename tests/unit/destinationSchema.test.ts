@@ -32,7 +32,9 @@ describe("DestinationSchema", () => {
       schema: "public",
     });
     expect(d.type).toBe("postgres");
-    expect(d.payloadColumn).toBe("payload");
+    if (d.type === "postgres") {
+      expect(d.payloadColumn).toBe("payload");
+    }
   });
 
   it("parses bigquery destination", () => {

@@ -131,6 +131,8 @@ export type HealingConfig = {
   notifyOnDead: boolean;
 };
 
+export type DeploymentEnvironment = "dev" | "staging" | "prod";
+
 // ─── Endpoint aggregate ───────────────────────────────────────────────────────
 
 export class Endpoint {
@@ -142,6 +144,7 @@ export class Endpoint {
     public readonly schema: Record<string, unknown>,
     public readonly destinations: Destination[],
     public readonly healingConfig: HealingConfig,
+    public readonly environment: DeploymentEnvironment,
     private _status: EndpointStatus,
     private _totalEventsReceived: number,
     private _totalEventsLoaded: number,
@@ -161,6 +164,7 @@ export class Endpoint {
     schema: Record<string, unknown>;
     destinations: Destination[];
     healingConfig?: Partial<HealingConfig>;
+    environment?: DeploymentEnvironment;
     webhookSecret: string;
   }): Endpoint {
     const defaultHealing: HealingConfig = {
@@ -179,6 +183,7 @@ export class Endpoint {
       params.schema,
       params.destinations,
       { ...defaultHealing, ...params.healingConfig },
+      params.environment ?? "prod",
       "active",
       0, 0, 0, 0, null,
       params.webhookSecret,
@@ -195,6 +200,7 @@ export class Endpoint {
     schema: Record<string, unknown>;
     destinations: Destination[];
     healingConfig: HealingConfig;
+    environment?: DeploymentEnvironment;
     status: EndpointStatus;
     totalEventsReceived: number;
     totalEventsLoaded: number;
@@ -207,7 +213,7 @@ export class Endpoint {
   }): Endpoint {
     return new Endpoint(
       data.id, data.tenantId, data.name, data.slug, data.schema,
-      data.destinations, data.healingConfig, data.status,
+      data.destinations, data.healingConfig, data.environment ?? "prod", data.status,
       data.totalEventsReceived, data.totalEventsLoaded,
       data.totalEventsHealed, data.totalEventsDead,
       data.lastActivityAt, data.webhookSecret,
@@ -244,6 +250,119 @@ export class Endpoint {
   activate(): void         { this._status = "active"; this._updatedAt = new Date(); }
   pause(): void            { this._status = "paused"; this._updatedAt = new Date(); }
   isActive(): boolean      { return this._status === "active"; }
+
+  withEnvironment(env: DeploymentEnvironment): Endpoint {
+    return Endpoint.reconstitute({
+      id: this.id,
+      tenantId: this.tenantId,
+      name: this.name,
+      slug: this.slug,
+      schema: this.schema,
+      destinations: this.destinations,
+      healingConfig: this.healingConfig,
+      environment: env,
+      status: this._status,
+      totalEventsReceived: this._totalEventsReceived,
+      totalEventsLoaded: this._totalEventsLoaded,
+      totalEventsHealed: this._totalEventsHealed,
+      totalEventsDead: this._totalEventsDead,
+      lastActivityAt: this._lastActivityAt,
+      webhookSecret: this.webhookSecret,
+      createdAt: this.createdAt,
+      updatedAt: new Date(),
+    });
+  }
+
+  withHealingConfig(patch: Partial<HealingConfig>): Endpoint {
+    return Endpoint.reconstitute({
+      id: this.id,
+      tenantId: this.tenantId,
+      name: this.name,
+      slug: this.slug,
+      schema: this.schema,
+      destinations: this.destinations,
+      healingConfig: { ...this.healingConfig, ...patch },
+      environment: this.environment,
+      status: this._status,
+      totalEventsReceived: this._totalEventsReceived,
+      totalEventsLoaded: this._totalEventsLoaded,
+      totalEventsHealed: this._totalEventsHealed,
+      totalEventsDead: this._totalEventsDead,
+      lastActivityAt: this._lastActivityAt,
+      webhookSecret: this.webhookSecret,
+      createdAt: this.createdAt,
+      updatedAt: new Date(),
+    });
+  }
+
+  withSchemaAndDestinations(
+    schema: Record<string, unknown>,
+    destinations: Destination[]
+  ): Endpoint {
+    return Endpoint.reconstitute({
+      id: this.id,
+      tenantId: this.tenantId,
+      name: this.name,
+      slug: this.slug,
+      schema,
+      destinations,
+      healingConfig: this.healingConfig,
+      environment: this.environment,
+      status: this._status,
+      totalEventsReceived: this._totalEventsReceived,
+      totalEventsLoaded: this._totalEventsLoaded,
+      totalEventsHealed: this._totalEventsHealed,
+      totalEventsDead: this._totalEventsDead,
+      lastActivityAt: this._lastActivityAt,
+      webhookSecret: this.webhookSecret,
+      createdAt: this.createdAt,
+      updatedAt: new Date(),
+    });
+  }
+
+  withStatus(status: EndpointStatus): Endpoint {
+    return Endpoint.reconstitute({
+      id: this.id,
+      tenantId: this.tenantId,
+      name: this.name,
+      slug: this.slug,
+      schema: this.schema,
+      destinations: this.destinations,
+      healingConfig: this.healingConfig,
+      environment: this.environment,
+      status,
+      totalEventsReceived: this._totalEventsReceived,
+      totalEventsLoaded: this._totalEventsLoaded,
+      totalEventsHealed: this._totalEventsHealed,
+      totalEventsDead: this._totalEventsDead,
+      lastActivityAt: this._lastActivityAt,
+      webhookSecret: this.webhookSecret,
+      createdAt: this.createdAt,
+      updatedAt: new Date(),
+    });
+  }
+
+  withName(name: string): Endpoint {
+    return Endpoint.reconstitute({
+      id: this.id,
+      tenantId: this.tenantId,
+      name,
+      slug: this.slug,
+      schema: this.schema,
+      destinations: this.destinations,
+      healingConfig: this.healingConfig,
+      environment: this.environment,
+      status: this._status,
+      totalEventsReceived: this._totalEventsReceived,
+      totalEventsLoaded: this._totalEventsLoaded,
+      totalEventsHealed: this._totalEventsHealed,
+      totalEventsDead: this._totalEventsDead,
+      lastActivityAt: this._lastActivityAt,
+      webhookSecret: this.webhookSecret,
+      createdAt: this.createdAt,
+      updatedAt: new Date(),
+    });
+  }
 
   getWebhookUrl(baseUrl: string): string {
     return `${baseUrl}/webhook/${this.tenantId}/${this.slug}`;
@@ -285,6 +404,7 @@ export class Endpoint {
       schema: this.schema,
       destinations: this.destinations,
       healingConfig: this.healingConfig,
+      environment: this.environment,
       status: this._status,
       stats: this.stats,
       lastActivityAt: this._lastActivityAt?.toISOString() ?? null,

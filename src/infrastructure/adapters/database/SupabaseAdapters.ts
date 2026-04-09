@@ -13,6 +13,7 @@ import type {
   HealingConfig,
   EndpointStatus,
   DestinationResult,
+  DeploymentEnvironment,
 } from "../../../domain/events/entities/Endpoint.js";
 import type { RuleLanguage, RuleStatus } from "../../../domain/healing/entities/TransformationRule.js";
 import { decryptDestinationsWithKey } from "../../utils/destinationSecretsCodec.js";
@@ -102,6 +103,11 @@ export class SupabaseEventRepository implements IEventRepository {
     return (count ?? 0) > 0;
   }
 
+  async deleteById(id: string): Promise<void> {
+    const { error } = await this.client.from("events").delete().eq("id", id);
+    if (error) throw new DatabaseError(`Failed to delete event: ${error.message}`);
+  }
+
   private hydrateEvent(row: Record<string, unknown>): RawEvent {
     return RawEvent.reconstitute({
       id: row["id"] as string,
@@ -145,6 +151,7 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
       schema: s["schema"],
       destinations: s["destinations"],
       healing_config: s["healingConfig"],
+      environment: endpoint.environment,
       status: s["status"],
       stats: s["stats"],
       webhook_secret: endpoint.webhookSecret,
@@ -194,6 +201,33 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
     if (error) throw new DatabaseError(`Failed to update endpoint: ${error.message}`);
   }
 
+  async updateFull(endpoint: Endpoint): Promise<void> {
+    const s = endpoint.toSnapshot();
+    const { error } = await this.client.from("endpoints").update({
+      name: s["name"],
+      slug: s["slug"],
+      schema: s["schema"],
+      destinations: s["destinations"],
+      healing_config: s["healingConfig"],
+      environment: endpoint.environment,
+      status: s["status"],
+      stats: s["stats"],
+      last_activity_at: s["lastActivityAt"],
+      updated_at: s["updatedAt"],
+    }).eq("id", endpoint.id);
+    if (error) throw new DatabaseError(`Failed to update endpoint config: ${error.message}`);
+  }
+
+  async countActiveByTenant(tenantId: string): Promise<number> {
+    const { count, error } = await this.client
+      .from("endpoints")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("status", "active");
+    if (error) throw new DatabaseError(`Failed to count endpoints: ${error.message}`);
+    return count ?? 0;
+  }
+
   async delete(id: string): Promise<void> {
     const { error } = await this.client.from("endpoints").delete().eq("id", id);
     if (error) throw new DatabaseError(`Failed to delete endpoint: ${error.message}`);
@@ -205,6 +239,10 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
     if (this.destinationCryptoKey) {
       destinations = await decryptDestinationsWithKey(destinations, this.destinationCryptoKey);
     }
+    const envRaw = row["environment"] as string | undefined;
+    const environment: DeploymentEnvironment =
+      envRaw === "dev" || envRaw === "staging" || envRaw === "prod" ? envRaw : "prod";
+
     return Endpoint.reconstitute({
       id: row["id"] as string,
       tenantId: row["tenant_id"] as string,
@@ -213,6 +251,7 @@ export class SupabaseEndpointRepository implements IEndpointRepository {
       schema: row["schema"] as Record<string, unknown>,
       destinations,
       healingConfig: row["healing_config"] as HealingConfig,
+      environment,
       status: row["status"] as EndpointStatus,
       totalEventsReceived: stats["total"] ?? 0,
       totalEventsLoaded: stats["loaded"] ?? 0,

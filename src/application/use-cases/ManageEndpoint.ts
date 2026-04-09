@@ -5,6 +5,8 @@ import {
   DestinationSchema,
   type Destination,
   type HealingConfig,
+  type DeploymentEnvironment,
+  type EndpointStatus,
 } from "../../domain/events/entities/Endpoint.js";
 import type { IEndpointRepository } from "../../domain/events/repositories/IEndpointRepository.js";
 import { generateId, generateWebhookSecret } from "../../infrastructure/utils/crypto.js";
@@ -24,6 +26,7 @@ export type CreateEndpointCommand = {
   destination?: Destination;
   destinations?: Destination[];
   healingConfig?: Partial<HealingConfig>;
+  environment?: DeploymentEnvironment;
 };
 
 export type CreateEndpointResult = {
@@ -74,6 +77,7 @@ export class CreateEndpoint {
       schema: command.schema,
       destinations,
       ...(command.healingConfig ? { healingConfig: command.healingConfig } : {}),
+      ...(command.environment ? { environment: command.environment } : {}),
       webhookSecret,
     });
 
@@ -126,6 +130,54 @@ export class DeleteEndpoint {
     }
     await this.endpointRepo.delete(params.endpointId);
     logger.info("Endpoint deleted", params);
+  }
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+export type UpdateEndpointCommand = {
+  tenantId: string;
+  endpointId: string;
+  name?: string;
+  schema?: Record<string, unknown>;
+  destinations?: Destination[];
+  healingConfig?: Partial<HealingConfig>;
+  environment?: DeploymentEnvironment;
+  status?: EndpointStatus;
+};
+
+export class UpdateEndpoint {
+  constructor(
+    private readonly endpointRepo: IEndpointRepository,
+    private readonly destinationCryptoKey?: string
+  ) {}
+
+  async execute(command: UpdateEndpointCommand): Promise<Record<string, unknown>> {
+    const ep = await this.endpointRepo.findById(command.endpointId);
+    if (!ep || ep.tenantId !== command.tenantId) {
+      throw new Error("Endpoint not found");
+    }
+
+    let next = ep;
+    if (command.name !== undefined) next = next.withName(command.name);
+    if (command.environment !== undefined) next = next.withEnvironment(command.environment);
+    if (command.healingConfig) next = next.withHealingConfig(command.healingConfig);
+    if (command.status !== undefined) next = next.withStatus(command.status);
+
+    if (command.schema !== undefined || command.destinations !== undefined) {
+      if (!command.schema || !command.destinations) {
+        throw new Error("schema and destinations are required together when updating either");
+      }
+      if (command.destinations.length > 5) throw new Error("Maximum 5 destinations per endpoint");
+      let destinations = command.destinations.map((d) => DestinationSchema.parse(d));
+      if (this.destinationCryptoKey) {
+        destinations = await encryptDestinationsWithKey(destinations, this.destinationCryptoKey);
+      }
+      next = next.withSchemaAndDestinations(command.schema, destinations);
+    }
+
+    await this.endpointRepo.updateFull(next);
+    return toPublicEndpointSnapshot(next.toSnapshot());
   }
 }
 

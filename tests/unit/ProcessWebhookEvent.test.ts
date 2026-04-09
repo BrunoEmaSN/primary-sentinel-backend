@@ -43,6 +43,7 @@ function makeDeps() {
     findByTenantAndEndpoint: vi.fn().mockResolvedValue({ events: [], total: 0 }),
     updateStatus: vi.fn().mockResolvedValue(undefined),
     existsById: vi.fn().mockResolvedValue(false),
+    deleteById: vi.fn().mockResolvedValue(undefined),
   };
 
   const endpointRepo = {
@@ -51,6 +52,8 @@ function makeDeps() {
     findBySlug: vi.fn().mockResolvedValue(endpoint),
     findByTenantId: vi.fn().mockResolvedValue([endpoint]),
     update: vi.fn().mockResolvedValue(undefined),
+    updateFull: vi.fn().mockResolvedValue(undefined),
+    countActiveByTenant: vi.fn().mockResolvedValue(0),
     delete: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -85,8 +88,8 @@ function makeDeps() {
     delete: vi.fn().mockResolvedValue(undefined),
   };
 
-  const notificationService = {
-    send: vi.fn().mockResolvedValue(undefined),
+  const incidentAlerts = {
+    dispatch: vi.fn().mockResolvedValue(undefined),
   };
 
   const sandboxService = {
@@ -110,9 +113,24 @@ function makeDeps() {
 
   return {
     eventRepo, endpointRepo, ruleRepo, ruleCache,
-    llmService, storageService, notificationService,
+    llmService, storageService, incidentAlerts,
     sandboxService, outputDispatcher, endpoint,
   };
+}
+
+function createProcessWebhook(deps: ReturnType<typeof makeDeps>) {
+  return new ProcessWebhookEvent(
+    deps.eventRepo,
+    deps.endpointRepo,
+    deps.ruleRepo,
+    deps.ruleCache,
+    deps.llmService,
+    deps.storageService,
+    deps.sandboxService,
+    deps.outputDispatcher as never,
+    deps.incidentAlerts as never,
+    undefined
+  );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -121,11 +139,7 @@ describe("ProcessWebhookEvent", () => {
   describe("valid payload — fast path", () => {
     it("validates, dispatches, returns loaded status", async () => {
       const deps = makeDeps();
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-001",
@@ -151,11 +165,7 @@ describe("ProcessWebhookEvent", () => {
       const deps = makeDeps();
       deps.eventRepo.existsById = vi.fn().mockResolvedValue(true);
 
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-dup",
@@ -175,11 +185,7 @@ describe("ProcessWebhookEvent", () => {
   describe("invalid payload — healing path", () => {
     it("calls LLM, runs sandbox, dispatches healed payload", async () => {
       const deps = makeDeps();
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-heal",
@@ -208,11 +214,7 @@ describe("ProcessWebhookEvent", () => {
         },
       ]);
 
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-fail",
@@ -242,11 +244,7 @@ describe("ProcessWebhookEvent", () => {
       const deps = makeDeps();
       deps.endpointRepo.findBySlug = vi.fn().mockResolvedValue(endpointNoHealing);
 
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-nodlq",
@@ -285,11 +283,7 @@ describe("ProcessWebhookEvent", () => {
         { destinationType: "webhook", destinationIndex: 1, success: false, error: "timeout", durationMs: 5000 },
       ]);
 
-      const useCase = new ProcessWebhookEvent(
-        deps.eventRepo, deps.endpointRepo, deps.ruleRepo, deps.ruleCache,
-        deps.llmService, deps.storageService, deps.notificationService,
-        deps.sandboxService, deps.outputDispatcher as any
-      );
+      const useCase = createProcessWebhook(deps);
 
       const result = await useCase.execute({
         eventId: "evt-partial",

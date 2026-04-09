@@ -13,4 +13,6 @@ export interface IEventRepository {
   }): Promise<{ events: RawEvent[]; total: number }>;
   updateStatus(event: RawEvent): Promise<void>;
   existsById(id: string): Promise<boolean>;
+  /** Elimina un evento (p. ej. DLQ descartada). Verifica tenant en la capa de aplicación. */
+  deleteById(id: string): Promise<void>;
 }

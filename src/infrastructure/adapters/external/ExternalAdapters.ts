@@ -75,10 +75,14 @@ export class ResendNotificationService implements INotificationService {
 
     // Persist notification to Supabase for dashboard visibility
     const supabase = createClient(this.supabaseUrl, this.supabaseKey);
+    const summaryTitle =
+      payload.incidentSummary && typeof payload.incidentSummary["title"] === "string"
+        ? (payload.incidentSummary["title"] as string)
+        : subject;
     await supabase.from("notifications").insert({
       tenant_id: payload.tenantId,
       type: payload.type,
-      title: subject,
+      title: summaryTitle,
       message: `Event ${payload.eventId} — ${payload.endpointName}`,
       endpoint_id: payload.endpointId ?? null,
       event_id: payload.eventId,
@@ -93,6 +97,15 @@ export class ResendNotificationService implements INotificationService {
   }
 
   private buildEmail(payload: NotificationPayload): { subject: string; html: string } {
+    if (payload.htmlBody) {
+      return {
+        subject:
+          payload.type === "dead_letter"
+            ? `🚨 Primary Sentinel — ${payload.endpointName}`
+            : `✅ Primary Sentinel — ${payload.endpointName}`,
+        html: payload.htmlBody,
+      };
+    }
     switch (payload.type) {
       case "healing_success":
         return {

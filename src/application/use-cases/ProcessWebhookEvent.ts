@@ -8,12 +8,9 @@ import type {
   ITransformationRuleRepository,
   IRuleCache,
 } from "../../domain/healing/repositories/ITransformationRuleRepository.js";
-import type {
-  ILLMService,
-  IStorageService,
-  INotificationService,
-  ISandboxService,
-} from "../ports/index.js";
+import type { ILLMService, IStorageService, ISandboxService } from "../ports/index.js";
+import type { TenantInfraAdapter } from "../../infrastructure/adapters/database/TenantInfraAdapter.js";
+import type { IncidentAlertOrchestrator } from "../../infrastructure/notifications/IncidentAlertOrchestrator.js";
 import { TransformationRule } from "../../domain/healing/entities/TransformationRule.js";
 import { OutputDispatcher } from "./OutputDispatcher.js";
 import {
@@ -60,9 +57,10 @@ export class ProcessWebhookEvent {
     private readonly ruleCache: IRuleCache,
     private readonly llmService: ILLMService,
     private readonly storageService: IStorageService,
-    private readonly notificationService: INotificationService,
     private readonly sandboxService: ISandboxService,
-    private readonly outputDispatcher: OutputDispatcher
+    private readonly outputDispatcher: OutputDispatcher,
+    private readonly incidentAlerts: IncidentAlertOrchestrator,
+    private readonly tenantInfra?: TenantInfraAdapter
   ) {}
 
   async execute(
@@ -73,6 +71,8 @@ export class ProcessWebhookEvent {
       tenantId: command.tenantId,
       endpointSlug: command.endpointSlug,
     });
+
+    const pipelineStarted = Date.now();
 
     // ── Step 0: Idempotency guard ───────────────────────────────────────────
     if (await this.eventRepo.existsById(command.eventId)) {
@@ -120,7 +120,13 @@ export class ProcessWebhookEvent {
       // ✅ Fast path — valid payload
       event.markAsValidated(validationResult.data);
       await this.eventRepo.updateStatus(event);
-      return await this.dispatchAndFinalize(event, endpoint, validationResult.data, "loaded");
+      return await this.dispatchAndFinalize(
+        event,
+        endpoint,
+        validationResult.data,
+        "loaded",
+        pipelineStarted
+      );
     }
 
     // ── Step 4: HealingAgent ────────────────────────────────────────────────
@@ -170,10 +176,24 @@ export class ProcessWebhookEvent {
             if (endpoint.healingConfig.notifyOnHealing) {
               await this.notifyHealing(event, endpoint, rule, "cache_hit");
             }
+            await this.logAiDecision({
+              tenantId: command.tenantId,
+              endpoint,
+              event,
+              ruleId: rule.id,
+              action: "rule_applied_cache",
+              detail: { method: "cache_hit" },
+            });
 
             endpoint.incrementHealed();
             await this.endpointRepo.update(endpoint);
-            return await this.dispatchAndFinalize(event, endpoint, healedValidation.data, "healed");
+            return await this.dispatchAndFinalize(
+              event,
+              endpoint,
+              healedValidation.data,
+              "healed",
+              pipelineStarted
+            );
           }
         }
         rule.recordFailure();
@@ -252,8 +272,23 @@ export class ProcessWebhookEvent {
       await this.notifyHealing(event, endpoint, newRule, "llm_generated");
     }
 
+    await this.logAiDecision({
+      tenantId: command.tenantId,
+      endpoint,
+      event,
+      ruleId: newRule.id,
+      action: "rule_generated_llm",
+      detail: { model: healingResult.modelUsed },
+    });
+
     logger.info("Event healed via LLM", { eventId: event.id, ruleId: newRule.id });
-    return await this.dispatchAndFinalize(event, endpoint, healedValidation.data, "healed");
+    return await this.dispatchAndFinalize(
+      event,
+      endpoint,
+      healedValidation.data,
+      "healed",
+      pipelineStarted
+    );
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
@@ -266,17 +301,33 @@ export class ProcessWebhookEvent {
     event: RawEvent,
     endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint,
     payload: unknown,
-    finalStatus: "loaded" | "healed"
+    finalStatus: "loaded" | "healed",
+    pipelineStarted: number
   ): Promise<ProcessWebhookEventResult> {
     logger.info("Dispatching to destinations", {
       eventId: event.id,
       destinationCount: endpoint.destinations.length,
     });
 
+    const d0 = Date.now();
     const dispatchResults = await this.outputDispatcher.dispatch(
       endpoint.destinations,
       payload
     );
+    const dispatchMs = Date.now() - d0;
+
+    await this.tenantInfra?.insertPipelineMetric({
+      tenantId: event.tenantId,
+      endpointId: endpoint.id,
+      stage: "dispatch",
+      latencyMs: dispatchMs,
+    });
+    await this.tenantInfra?.insertPipelineMetric({
+      tenantId: event.tenantId,
+      endpointId: endpoint.id,
+      stage: "pipeline_total",
+      latencyMs: Date.now() - pipelineStarted,
+    });
 
     const allFailed = dispatchResults.length > 0 && dispatchResults.every((r) => !r.success);
 
@@ -330,15 +381,39 @@ export class ProcessWebhookEvent {
       .store(`dlq/${event.tenantId}/${event.id}.json`, event.toSnapshot())
       .catch((e) => logger.error("Failed to store DLQ payload", { error: e }));
 
+    const rl = reason.toLowerCase();
+    if (rl.includes("schema") || rl.includes("validation")) {
+      await this.tenantInfra
+        ?.upsertEventTag({
+          tenantId: event.tenantId,
+          eventId: event.id,
+          tag: "esquema",
+          source: "auto",
+        })
+        .catch(() => undefined);
+    }
+    if (rl.includes("destination") || rl.includes("webhook")) {
+      await this.tenantInfra
+        ?.upsertEventTag({
+          tenantId: event.tenantId,
+          eventId: event.id,
+          tag: "destino",
+          source: "auto",
+        })
+        .catch(() => undefined);
+    }
+
     if (endpoint.healingConfig.notifyOnDead) {
-      await this.notificationService
-        .send({
+      await this.incidentAlerts
+        .dispatch({
           type: "dead_letter",
+          kind: "dead_letter",
           tenantId: event.tenantId,
           endpointId: endpoint.id,
-          tenantEmail: "",
           endpointName: endpoint.name,
           eventId: event.id,
+          environment: endpoint.environment,
+          reason,
           details: { reason, errorLog: event.errorLog },
         })
         .catch((e) => logger.error("Failed to send DLQ notification", { error: e }));
@@ -354,17 +429,37 @@ export class ProcessWebhookEvent {
     rule: TransformationRule,
     method: string
   ): Promise<void> {
-    await this.notificationService
-      .send({
+    await this.incidentAlerts
+      .dispatch({
         tenantId: event.tenantId,
         endpointId: endpoint.id,
         type: "healing_success",
-        tenantEmail: "",
+        kind: "healing_success",
         endpointName: endpoint.name,
         eventId: event.id,
+        environment: endpoint.environment,
         details: { ruleId: rule.id, method, description: rule.description },
       })
       .catch((e) => logger.error("Failed to send healing notification", { error: e }));
+  }
+
+  private async logAiDecision(params: {
+    tenantId: string;
+    endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint;
+    event: RawEvent;
+    ruleId: string;
+    action: string;
+    detail: Record<string, unknown>;
+  }): Promise<void> {
+    await this.tenantInfra?.insertAiDecisionLog({
+      tenantId: params.tenantId,
+      endpointId: params.endpoint.id,
+      eventId: params.event.id,
+      ruleId: params.ruleId,
+      action: params.action,
+      detail: params.detail,
+      actor: "system",
+    });
   }
 }
 

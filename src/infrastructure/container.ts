@@ -11,6 +11,8 @@ import {
   R2StorageAdapter,
   ResendNotificationService,
 } from "./adapters/external/ExternalAdapters.js";
+import { TenantInfraAdapter } from "./adapters/database/TenantInfraAdapter.js";
+import { IncidentAlertOrchestrator } from "./notifications/IncidentAlertOrchestrator.js";
 import { AnthropicLLMAdapter } from "./adapters/llm/AnthropicLLMAdapter.js";
 import { JSSandboxAdapter } from "./adapters/sandbox/JSSandboxAdapter.js";
 import { OutputDispatcher } from "../application/use-cases/OutputDispatcher.js";
@@ -23,6 +25,8 @@ export type Dependencies = {
   storageService: R2StorageAdapter;
   llmService: AnthropicLLMAdapter;
   notificationService: ResendNotificationService;
+  tenantInfra: TenantInfraAdapter;
+  incidentAlerts: IncidentAlertOrchestrator;
   sandboxService: JSSandboxAdapter;
   outputDispatcher: OutputDispatcher;
 };
@@ -47,13 +51,14 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_KEY
   );
+  const tenantInfra = new TenantInfraAdapter(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  const incidentAlerts = new IncidentAlertOrchestrator(notificationService, tenantInfra);
   const sandboxService = new JSSandboxAdapter();
-  // NEW: OutputDispatcher — multi-destination fanout engine
   const outputDispatcher = new OutputDispatcher(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
 
   _deps = {
     eventRepo, endpointRepo, ruleRepo, ruleCache,
-    storageService, llmService, notificationService,
+    storageService, llmService, notificationService, tenantInfra, incidentAlerts,
     sandboxService, outputDispatcher,
   };
 
