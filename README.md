@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="1888" height="544" alt="primary-sentinel-background" src="https://github.com/user-attachments/assets/8775ec60-358e-4740-b5db-0fd5500d780f" />
+  <img width="1888" height="544" alt="background_back" src="https://github.com/user-attachments/assets/95d1b69d-77b9-40ae-a988-71de10960986" />
   <br />
   <div>
     <img src="https://img.shields.io/badge/-Google%20Cloud-black?style=for-the-badge&logo=googlecloud&color=000000" alt="google cloud" />
