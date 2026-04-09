@@ -104,7 +104,7 @@ export class TenantInfraAdapter {
     }
   }
 
-  async insertPipelineMetric(params: {
+  async insertStageMetric(params: {
     tenantId: string;
     endpointId?: string;
     stage: string;
@@ -112,7 +112,7 @@ export class TenantInfraAdapter {
     backlogEstimate?: number;
   }): Promise<void> {
     try {
-      await this.client.from("pipeline_stage_metrics").insert({
+      await this.client.from("stage_metrics").insert({
         tenant_id: params.tenantId,
         endpoint_id: params.endpointId ?? null,
         stage: params.stage,
@@ -120,7 +120,7 @@ export class TenantInfraAdapter {
         backlog_estimate: params.backlogEstimate ?? null,
       });
     } catch (e) {
-      logger.warn("pipeline_stage_metrics insert failed", { error: String(e) });
+      logger.warn("stage_metrics insert failed", { error: String(e) });
     }
   }
 
@@ -179,9 +179,9 @@ export class TenantInfraAdapter {
     return data ?? [];
   }
 
-  async listPipelineMetrics(tenantId: string, sinceIso: string): Promise<unknown[]> {
+  async listStageMetrics(tenantId: string, sinceIso: string): Promise<unknown[]> {
     const { data, error } = await this.client
-      .from("pipeline_stage_metrics")
+      .from("stage_metrics")
       .select("*")
       .eq("tenant_id", tenantId)
       .gte("recorded_at", sinceIso)

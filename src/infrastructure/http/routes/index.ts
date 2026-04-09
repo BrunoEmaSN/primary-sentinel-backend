@@ -124,8 +124,8 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     if (path === "/api/operations/ai-history" && method === "GET") {
       return await handleAiHistory(url, auth, deps);
     }
-    if (path === "/api/metrics/pipeline" && method === "GET") {
-      return await handlePipelineMetrics(url, auth, deps);
+    if (path === "/api/metrics/stages" && method === "GET") {
+      return await handleStageMetrics(url, auth, deps);
     }
     if (path === "/api/suggestions/heuristics" && method === "GET") {
       return await handleHeuristicSuggestions(auth, deps);
@@ -251,7 +251,7 @@ async function handleCreateEndpoint(
   const activeCount = await deps.endpointRepo.countActiveByTenant(auth.tenantId);
   if (settings.billing_plan === "free" && activeCount >= 1) {
     return errorResponse(
-      "Plan Gratis: solo 1 pipeline activo. Pausa un endpoint existente o actualiza el plan (véase facturación).",
+      "Plan Gratis: solo 1 endpoint activo. Pausa un endpoint existente o actualiza el plan (véase facturación).",
       402
     );
   }
@@ -530,16 +530,16 @@ async function handleAiHistory(url: URL, auth: AuthContext, deps: Dependencies):
   return jsonResponse({ data: rows });
 }
 
-async function handlePipelineMetrics(url: URL, auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleStageMetrics(url: URL, auth: AuthContext, deps: Dependencies): Promise<Response> {
   const hours = parseInt(url.searchParams.get("hours") ?? "24", 10);
   const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
-  const rows = await deps.tenantInfra.listPipelineMetrics(auth.tenantId, since);
+  const rows = await deps.tenantInfra.listStageMetrics(auth.tenantId, since);
   return jsonResponse({ data: rows, hours });
 }
 
 async function handleHeuristicSuggestions(auth: AuthContext, deps: Dependencies): Promise<Response> {
   const since = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
-  const rows = (await deps.tenantInfra.listPipelineMetrics(auth.tenantId, since)) as {
+  const rows = (await deps.tenantInfra.listStageMetrics(auth.tenantId, since)) as {
     stage?: string;
     latency_ms?: number;
   }[];

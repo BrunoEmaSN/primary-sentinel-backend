@@ -1,4 +1,4 @@
-// tests/integration/webhook-pipeline.test.ts
+// tests/integration/webhook-ingestion.test.ts
 // Requires a running worker: WORKER_URL=http://localhost:8787 TEST_TENANT_TOKEN=<jwt> npx vitest run tests/integration
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 const WORKER_URL = process.env["WORKER_URL"] ?? "http://localhost:8787";
 const TOKEN      = process.env["TEST_TENANT_TOKEN"] ?? "";
 
-describe.skipIf(!TOKEN)("Webhook pipeline — integration", () => {
+describe.skipIf(!TOKEN)("Webhook ingestion — integration", () => {
   let endpointId: string;
   let webhookUrl: string;
   let webhookSecret: string;

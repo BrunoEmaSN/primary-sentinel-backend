@@ -72,7 +72,7 @@ export class ProcessWebhookEvent {
       endpointSlug: command.endpointSlug,
     });
 
-    const pipelineStarted = Date.now();
+    const processingStarted = Date.now();
 
     // ── Step 0: Idempotency guard ───────────────────────────────────────────
     if (await this.eventRepo.existsById(command.eventId)) {
@@ -125,7 +125,7 @@ export class ProcessWebhookEvent {
         endpoint,
         validationResult.data,
         "loaded",
-        pipelineStarted
+        processingStarted
       );
     }
 
@@ -192,7 +192,7 @@ export class ProcessWebhookEvent {
               endpoint,
               healedValidation.data,
               "healed",
-              pipelineStarted
+              processingStarted
             );
           }
         }
@@ -287,7 +287,7 @@ export class ProcessWebhookEvent {
       endpoint,
       healedValidation.data,
       "healed",
-      pipelineStarted
+      processingStarted
     );
   }
 
@@ -302,7 +302,7 @@ export class ProcessWebhookEvent {
     endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint,
     payload: unknown,
     finalStatus: "loaded" | "healed",
-    pipelineStarted: number
+    processingStarted: number
   ): Promise<ProcessWebhookEventResult> {
     logger.info("Dispatching to destinations", {
       eventId: event.id,
@@ -316,17 +316,17 @@ export class ProcessWebhookEvent {
     );
     const dispatchMs = Date.now() - d0;
 
-    await this.tenantInfra?.insertPipelineMetric({
+    await this.tenantInfra?.insertStageMetric({
       tenantId: event.tenantId,
       endpointId: endpoint.id,
       stage: "dispatch",
       latencyMs: dispatchMs,
     });
-    await this.tenantInfra?.insertPipelineMetric({
+    await this.tenantInfra?.insertStageMetric({
       tenantId: event.tenantId,
       endpointId: endpoint.id,
-      stage: "pipeline_total",
-      latencyMs: Date.now() - pipelineStarted,
+      stage: "processing_total",
+      latencyMs: Date.now() - processingStarted,
     });
 
     const allFailed = dispatchResults.length > 0 && dispatchResults.every((r) => !r.success);

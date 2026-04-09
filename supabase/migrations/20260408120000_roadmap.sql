@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS event_snapshots (
 CREATE INDEX IF NOT EXISTS idx_snapshots_event ON event_snapshots (tenant_id, event_id);
 
 -- Métricas por etapa (Worker inserta)
-CREATE TABLE IF NOT EXISTS pipeline_stage_metrics (
+CREATE TABLE IF NOT EXISTS stage_metrics (
   id bigserial PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   endpoint_id uuid,
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS pipeline_stage_metrics (
   recorded_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_psm_tenant_time ON pipeline_stage_metrics (tenant_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stage_metrics_tenant_time ON stage_metrics (tenant_id, recorded_at DESC);
 
 -- Historial IA / overrides
 CREATE TABLE IF NOT EXISTS ai_decision_log (
