@@ -109,10 +109,10 @@ export class ResendNotificationService implements INotificationService {
     switch (payload.type) {
       case "healing_success":
         return {
-          subject: `✅ Primary Sentinel: API mutation auto-healed — ${payload.endpointName}`,
+          subject: `✅ Primary Sentinel: API mutation repaired — ${payload.endpointName}`,
           html: `
-            <h2>🔧 Auto-Healing Successful</h2>
-            <p>Primary Sentinel auto-fixed a schema mutation on <strong>${payload.endpointName}</strong>.</p>
+            <h2>🔧 Repair successful</h2>
+            <p>Primary Sentinel corrected a schema mutation on <strong>${payload.endpointName}</strong>.</p>
             <ul>
               <li><strong>Event ID:</strong> ${payload.eventId}</li>
               <li><strong>Rule ID:</strong> ${payload.details["ruleId"]}</li>

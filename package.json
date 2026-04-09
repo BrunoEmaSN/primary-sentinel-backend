@@ -1,7 +1,7 @@
 {
   "name": "sentinel-saas-backend",
   "version": "2.0.0",
-  "description": "Self-Healing AI Data Pipeline — multi-destination fanout (webhook + http_api)",
+  "description": "Autonomous Reliability & Security Intelligence — multi-destination fanout (webhook + http_api)",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

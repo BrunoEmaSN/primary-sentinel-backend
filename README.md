@@ -15,7 +15,7 @@
   </h3>
 </div>
 
-> Zero-downtime webhook integration that auto-detects, fixes, and learns from schema mutations.  
+> **Autonomous Reliability & Security Intelligence** — zero-downtime webhooks that auto-detect, fix, and learn from schema mutations.  
 > **v2 adds multi-destination fanout**: send validated payloads to Supabase + any webhook/API simultaneously.
 
 ---
