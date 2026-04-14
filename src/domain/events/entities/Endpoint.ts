@@ -2,6 +2,7 @@
 // Multi-destination fanout: supabase, webhook, http_api, postgres, mysql, bigquery
 
 import { z } from "zod";
+import type { ZodRawShape, ZodTypeAny } from "zod";
 
 export type EndpointStatus = "active" | "paused" | "error";
 
@@ -368,30 +369,86 @@ export class Endpoint {
     return `${baseUrl}/webhook/${this.tenantId}/${this.slug}`;
   }
 
-  buildZodSchema(): import("zod").ZodObject<import("zod").ZodRawShape> {
-    const shape: import("zod").ZodRawShape = {};
+  /** Convierte un fragmento JSON Schema en un tipo Zod (incluye enum, format, objetos anidados y arrays tipados). */
+  private buildZodField(value: Record<string, unknown>): ZodTypeAny {
+    const enumVals = value["enum"];
+    if (Array.isArray(enumVals) && enumVals.length > 0) {
+      return this.jsonSchemaEnumToZod(enumVals);
+    }
+
+    const type = value["type"];
+
+    if (type === "object" && value["properties"] && typeof value["properties"] === "object") {
+      return this.buildZodObjectFromProps(
+        value["properties"] as Record<string, Record<string, unknown>>,
+        value["required"] as string[] | undefined
+      );
+    }
+
+    if (type === "array") {
+      const items = value["items"];
+      if (items && typeof items === "object" && !Array.isArray(items)) {
+        return z.array(this.buildZodField(items as Record<string, unknown>));
+      }
+      return z.array(z.unknown());
+    }
+
+    if (type === "string") {
+      const fmt = value["format"];
+      if (fmt === "email") return z.string().email();
+      if (fmt === "uuid") return z.string().uuid();
+      return z.string();
+    }
+
+    if (type === "number") return z.number();
+    if (type === "integer") return z.number().int();
+    if (type === "boolean") return z.boolean();
+
+    if (type === "object") {
+      return z.record(z.unknown());
+    }
+
+    return z.unknown();
+  }
+
+  private buildZodObjectFromProps(
+    props: Record<string, Record<string, unknown>>,
+    required: string[] | undefined
+  ): z.ZodObject<ZodRawShape> {
+    const shape: ZodRawShape = {};
+    for (const [key, value] of Object.entries(props)) {
+      const isRequired = Array.isArray(required) && required.includes(key);
+      const zodType = this.buildZodField(value);
+      shape[key] = isRequired ? zodType : zodType.optional();
+    }
+    return z.object(shape);
+  }
+
+  private jsonSchemaEnumToZod(values: unknown[]): ZodTypeAny {
+    if (values.every((v): v is string => typeof v === "string")) {
+      const strs = values as string[];
+      if (strs.length === 1) return z.literal(strs[0]!);
+      const [first, ...rest] = strs as [string, ...string[]];
+      return z.enum([first, ...rest]);
+    }
+    if (values.length === 1) {
+      return z.literal(values[0] as string | number | boolean);
+    }
+    const literals = values.map((v) => z.literal(v as string | number | boolean));
+    return z.union(literals as unknown as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
+  }
+
+  buildZodSchema(): z.ZodObject<ZodRawShape> {
     const props = this.schema["properties"];
     const required = this.schema["required"] as string[] | undefined;
 
     if (props && typeof props === "object") {
-      for (const [key, value] of Object.entries(props as Record<string, Record<string, unknown>>)) {
-        const isRequired = Array.isArray(required) && required.includes(key);
-        let zodType: import("zod").ZodTypeAny;
-
-        switch (value["type"]) {
-          case "string":  zodType = z.string(); break;
-          case "number":
-          case "integer": zodType = z.number(); break;
-          case "boolean": zodType = z.boolean(); break;
-          case "array":   zodType = z.array(z.unknown()); break;
-          case "object":  zodType = z.record(z.unknown()); break;
-          default:        zodType = z.unknown();
-        }
-
-        shape[key] = isRequired ? zodType : zodType.optional();
-      }
+      return this.buildZodObjectFromProps(
+        props as Record<string, Record<string, unknown>>,
+        required
+      );
     }
-    return z.object(shape);
+    return z.object({});
   }
 
   toSnapshot(): Record<string, unknown> {
