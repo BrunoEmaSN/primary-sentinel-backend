@@ -110,38 +110,47 @@ export class OutputDispatcher {
     if (error) throw new Error(`Supabase insert error: ${error.message}`);
   }
 
-  private async toWebhook(dest: WebhookDestination, payload: unknown): Promise<number> {
+  private async runWebhookRequest(dest: WebhookDestination, payload: unknown): Promise<number> {
     const body = dest.wrapKey
       ? JSON.stringify({ [dest.wrapKey]: payload })
       : JSON.stringify(payload);
 
-    const run = async (): Promise<number> => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), dest.timeoutMs);
-      try {
-        const res = await fetch(dest.url, {
-          method: dest.method,
-          headers: { "Content-Type": "application/json", ...(dest.headers ?? {}) },
-          body,
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`Webhook ${res.status}: ${text.slice(0, 200)}`);
-        }
-        return res.status;
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), dest.timeoutMs);
     try {
-      return await run();
-    } catch (first) {
-      if (!dest.retryOnFailure) throw first;
-      logger.info("Webhook retry after failure", { url: dest.url });
-      return await run();
+      const res = await fetch(dest.url, {
+        method: dest.method,
+        headers: { "Content-Type": "application/json", ...(dest.headers ?? {}) },
+        body,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Webhook ${res.status}: ${text.slice(0, 200)}`);
+      }
+      return res.status;
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  private async toWebhook(dest: WebhookDestination, payload: unknown): Promise<number> {
+    const maxAttempts = dest.retryOnFailure ? 3 : 1;
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.runWebhookRequest(dest, payload);
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < maxAttempts) {
+          const delayMs = 500 * Math.pow(2, attempt - 1);
+          await new Promise((r) => setTimeout(r, delayMs));
+          logger.info(`Webhook retry ${attempt}/${maxAttempts}`, { url: dest.url, delayMs });
+        }
+      }
+    }
+    throw lastError!;
   }
 
   private async toHttpApi(dest: HttpApiDestination, payload: unknown): Promise<number> {

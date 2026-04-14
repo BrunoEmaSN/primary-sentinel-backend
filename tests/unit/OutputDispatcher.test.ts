@@ -69,6 +69,70 @@ describe("OutputDispatcher", () => {
       expect(results[0]!.success).toBe(false);
       expect(results[0]!.error).toContain("500");
     });
+
+    it("retries webhook with backoff when retryOnFailure and succeeds on second attempt", async () => {
+      vi.useFakeTimers();
+      try {
+        fetchMock
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 503,
+            text: async () => "unavailable",
+          })
+          .mockResolvedValueOnce({ ok: true, status: 200 });
+
+        const dest: Destination = {
+          type: "webhook",
+          url: "https://example.com/hook",
+          method: "POST",
+          retryOnFailure: true,
+          timeoutMs: 5000,
+        };
+
+        const promise = dispatcher.dispatch([dest], { id: "123" });
+
+        await vi.advanceTimersByTimeAsync(500);
+
+        const results = await promise;
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(results[0]!.success).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives up after 3 attempts when retryOnFailure and all fail", async () => {
+      vi.useFakeTimers();
+      try {
+        fetchMock.mockResolvedValue({
+          ok: false,
+          status: 503,
+          text: async () => "unavailable",
+        });
+
+        const dest: Destination = {
+          type: "webhook",
+          url: "https://example.com/hook",
+          method: "POST",
+          retryOnFailure: true,
+          timeoutMs: 5000,
+        };
+
+        const promise = dispatcher.dispatch([dest], { id: "123" });
+
+        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(1000);
+
+        const results = await promise;
+
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(results[0]!.success).toBe(false);
+        expect(results[0]!.error).toContain("503");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("dispatch — http_api with bearer auth", () => {
