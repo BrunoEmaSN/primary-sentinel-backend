@@ -9,7 +9,7 @@ import {
 import {
   UpstashRuleCache,
   R2StorageAdapter,
-  ResendNotificationService,
+  CloudflareEmailNotificationService,
 } from "./adapters/external/ExternalAdapters.js";
 import { TenantInfraAdapter } from "./adapters/database/TenantInfraAdapter.js";
 import { IncidentAlertOrchestrator } from "./notifications/IncidentAlertOrchestrator.js";
@@ -24,7 +24,7 @@ export type Dependencies = {
   ruleCache: UpstashRuleCache;
   storageService: R2StorageAdapter;
   llmService: AnthropicLLMAdapter;
-  notificationService: ResendNotificationService;
+  notificationService: CloudflareEmailNotificationService;
   tenantInfra: TenantInfraAdapter;
   incidentAlerts: IncidentAlertOrchestrator;
   sandboxService: JSSandboxAdapter;
@@ -46,8 +46,8 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   const ruleCache = new UpstashRuleCache(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
   const storageService = new R2StorageAdapter(env.DLQ_BUCKET);
   const llmService = new AnthropicLLMAdapter(env.ANTHROPIC_API_KEY);
-  const notificationService = new ResendNotificationService(
-    env.RESEND_API_KEY,
+  const notificationService = new CloudflareEmailNotificationService(
+    env.EMAIL,
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_KEY
   );

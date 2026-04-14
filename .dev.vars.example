@@ -25,8 +25,7 @@ QSTASH_NEXT_SIGNING_KEY=sig_...
 # En dev: http://localhost:8787 | En prod: tu URL de workers.dev
 WORKER_URL=http://localhost:8787
 
-# ── Resend (Email Notifications) ─────────────────────────
-RESEND_API_KEY=re_...
+# Email: binding [[send_email]] en wrangler.toml (sin API key en vars).
 
 # ── Misc ──────────────────────────────────────────────────
 ENVIRONMENT=development

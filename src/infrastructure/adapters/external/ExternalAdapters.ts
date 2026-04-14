@@ -1,7 +1,6 @@
 // src/infrastructure/adapters/external/ExternalAdapters.ts
 
 import { Redis } from "@upstash/redis";
-import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import type { IRuleCache } from "../../../domain/healing/repositories/ITransformationRuleRepository.js";
 import type {
@@ -56,29 +55,26 @@ export class R2StorageAdapter implements IStorageService {
   }
 }
 
-// ── Resend — email notifications ──────────────────────────────────────────────
+// ── Cloudflare Email — notifications (Workers binding, sin API key) ───────────
 
-export class ResendNotificationService implements INotificationService {
-  private client: Resend;
-  private fromEmail = "sentinel@notifications.yourdomain.com";
+export class CloudflareEmailNotificationService implements INotificationService {
+  private readonly fromEmail = "no-reply@primary-sentinel.com";
 
   constructor(
-    apiKey: string,
+    private readonly emailBinding: SendEmail,
     private readonly supabaseUrl: string,
     private readonly supabaseKey: string
-  ) {
-    this.client = new Resend(apiKey);
-  }
+  ) {}
 
   async send(payload: NotificationPayload): Promise<void> {
     const { subject, html } = this.buildEmail(payload);
 
-    // Persist notification to Supabase for dashboard visibility
     const supabase = createClient(this.supabaseUrl, this.supabaseKey);
     const summaryTitle =
       payload.incidentSummary && typeof payload.incidentSummary["title"] === "string"
         ? (payload.incidentSummary["title"] as string)
         : subject;
+
     await supabase.from("notifications").insert({
       tenant_id: payload.tenantId,
       type: payload.type,
@@ -88,9 +84,9 @@ export class ResendNotificationService implements INotificationService {
       event_id: payload.eventId,
     });
 
-    await this.client.emails.send({
+    await this.emailBinding.send({
       from: this.fromEmail,
-      to: payload.tenantEmail || "admin@yourdomain.com",
+      to: payload.tenantEmail || "admin@primary-sentinel.com",
       subject,
       html,
     });

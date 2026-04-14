@@ -19,7 +19,7 @@ export type WorkerEnv = {
   ANTHROPIC_API_KEY: string;
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
-  RESEND_API_KEY: string;
+  EMAIL: SendEmail;
   SENTINEL_WEBHOOK_SECRET: string;
   RULE_CACHE: KVNamespace;
   DLQ_BUCKET: R2Bucket;
