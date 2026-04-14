@@ -18,7 +18,6 @@ preview_bucket_name = "sentinel-dlq-preview"
 
 [[send_email]]
 name = "EMAIL"
-default_from = "no-reply@primary-sentinel.com"
 
 # Production CORS: ALLOWED_ORIGINS must list every browser origin that calls this Worker (comma-separated, exact https URLs).
 # Align with NEXT_PUBLIC_SITE_URL on Vercel. Each Vercel preview URL needs its own entry unless you use a single custom domain.
