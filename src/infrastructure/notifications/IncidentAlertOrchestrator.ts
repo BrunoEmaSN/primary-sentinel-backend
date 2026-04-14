@@ -93,15 +93,38 @@ export class IncidentAlertOrchestrator {
       const bodyObj = { incident: summary };
       const raw = JSON.stringify(bodyObj);
       const sig = await hmacSha256Hex(settings.alert_webhook_secret, raw);
-      await fetch(settings.alert_webhook_url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Sentinel-Signature": `sha256=${sig}`,
-          "X-Sentinel-Event": params.eventId,
-        },
-        body: raw,
-      }).catch((e) => logger.error("Alert webhook failed", { error: String(e) }));
+      try {
+        await this.fetchWithRetry(settings.alert_webhook_url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Sentinel-Signature": `sha256=${sig}`,
+            "X-Sentinel-Event": params.eventId,
+          },
+          body: raw,
+        });
+      } catch (e) {
+        logger.error("Alert webhook failed after retries", { error: String(e) });
+      }
     }
+  }
+
+  /** POST con reintentos y backoff ante fallos de red o HTTP no-2xx. */
+  private async fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    attempts = 3
+  ): Promise<Response> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetch(url, options);
+        if (res.ok) return res;
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+      } catch (e) {
+        if (i === attempts - 1) throw e;
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+    throw new Error("Alert webhook failed after retries");
   }
 }
