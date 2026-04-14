@@ -37,10 +37,34 @@ export class JSSandboxAdapter implements ISandboxService {
   }
 
   private validateScript(script: string): void {
+    // Patrones estructurales (p. ej. input["constructor"]) además de substring includes().
+    const dangerous =
+      /\[\s*['"`]constructor['"`]\s*\]|__proto__|prototype\s*\[|\.constructor\b/;
+    if (dangerous.test(script)) {
+      throw new SandboxSecurityError("Forbidden pattern detected");
+    }
     const forbidden = [
-      "globalThis", "process", "require(", "import(",
-      "__dirname", "__filename", "eval(", "Function(",
-      "setTimeout", "setInterval", "fetch(", "XMLHttpRequest", "WebSocket",
+      "globalThis",
+      "process",
+      "require(",
+      "import(",
+      "__dirname",
+      "__filename",
+      "eval(",
+      "Function(",
+      "setTimeout",
+      "setInterval",
+      "fetch(",
+      "XMLHttpRequest",
+      "WebSocket",
+      "constructor",
+      "prototype",
+      "__proto__",
+      "Reflect",
+      "Proxy",
+      "Symbol",
+      "arguments.callee",
+      ".constructor",
     ];
     for (const pattern of forbidden) {
       if (script.includes(pattern)) {
