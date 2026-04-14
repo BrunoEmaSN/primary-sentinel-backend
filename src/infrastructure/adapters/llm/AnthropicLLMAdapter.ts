@@ -6,6 +6,9 @@ import { createLogger } from "../../utils/logger.js";
 
 const logger = createLogger("AnthropicLLMAdapter");
 
+/** Below this threshold the script is not executed in the sandbox (event goes to DLQ). */
+const MIN_SANDBOX_CONFIDENCE = 0.4;
+
 const SYSTEM_PROMPT = `You are Primary Sentinel, an expert data transformation engine.
 Your task is to analyze a broken API payload and generate a JavaScript transformation function
 that converts the received payload into the expected schema format.
@@ -59,7 +62,15 @@ export class AnthropicLLMAdapter implements ILLMService {
       .join("");
 
     logger.info("LLM response received", { usage: response.usage });
-    return this.parseResponse(rawText);
+    const result = this.parseResponse(rawText);
+
+    if (result.confidence < MIN_SANDBOX_CONFIDENCE) {
+      throw new LLMLowConfidenceError(
+        `LLM confidence too low: ${result.confidence}. Sending to DLQ.`
+      );
+    }
+
+    return result;
   }
 
   private buildPrompt(request: HealingRequest): string {
@@ -117,5 +128,12 @@ export class LLMParseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "LLMParseError";
+  }
+}
+
+export class LLMLowConfidenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LLMLowConfidenceError";
   }
 }
