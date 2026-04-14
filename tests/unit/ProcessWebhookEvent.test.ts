@@ -161,6 +161,46 @@ describe("ProcessWebhookEvent", () => {
       expect(result.dispatchResults![0]!.success).toBe(true);
     });
 
+    it("sends to DLQ when global processing timeout is exceeded", async () => {
+      vi.useFakeTimers();
+      const deps = makeDeps();
+      let finishDispatch: () => void = () => {};
+      deps.outputDispatcher.dispatch = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishDispatch = () =>
+              resolve([
+                {
+                  destinationType: "webhook",
+                  destinationIndex: 0,
+                  success: true,
+                  durationMs: 1,
+                },
+              ]);
+          })
+      );
+
+      const useCase = createProcessWebhook(deps);
+      const execPromise = useCase.execute({
+        eventId: "evt-global-timeout",
+        tenantId: "tenant-001",
+        endpointSlug: "test-endpoint",
+        rawPayload: { id: "123", name: "Alice" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
+
+      await vi.advanceTimersByTimeAsync(28_000);
+      const result = await execPromise;
+
+      expect(result.status).toBe("dead");
+      expect(result.message).toContain("Global processing timeout exceeded");
+      expect(deps.storageService.store).toHaveBeenCalled();
+
+      finishDispatch();
+      vi.useRealTimers();
+    });
+
     it("skips duplicate events (idempotency)", async () => {
       const deps = makeDeps();
       deps.eventRepo.existsById = vi.fn().mockResolvedValue(true);

@@ -21,6 +21,9 @@ import { createLogger } from "../../infrastructure/utils/logger.js";
 
 const logger = createLogger("ProcessWebhookEvent");
 
+/** Wall-clock cap for one webhook processing run (below Cloudflare Workers' ~30s limit). */
+const GLOBAL_PROCESSING_TIMEOUT_MS = 28_000;
+
 export type ProcessWebhookEventCommand = {
   eventId: string;
   tenantId: string;
@@ -66,6 +69,57 @@ export class ProcessWebhookEvent {
   async execute(
     command: ProcessWebhookEventCommand
   ): Promise<ProcessWebhookEventResult> {
+    const capture: {
+      event?: RawEvent;
+      endpoint?: import("../../domain/events/entities/Endpoint.js").Endpoint;
+    } = {};
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new ProcessingTimeoutError()),
+        GLOBAL_PROCESSING_TIMEOUT_MS
+      );
+    });
+
+    try {
+      return await Promise.race([
+        this.runProcessing(command, capture).finally(() => {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
+        }),
+        timeoutPromise,
+      ]);
+    } catch (err) {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (err instanceof ProcessingTimeoutError) {
+        if (capture.event && capture.endpoint) {
+          logger.error("Global processing timeout, sending to DLQ", {
+            eventId: capture.event.id,
+            endpointId: capture.endpoint.id,
+          });
+          return await this.sendToDLQ(
+            capture.event,
+            capture.endpoint,
+            "Global processing timeout exceeded"
+          );
+        }
+        throw err;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Core pipeline (validate → heal → dispatch). Used under a global timeout in {@link execute}.
+   * After the raw event is persisted, {@link capture} is filled so a timeout can still DLQ.
+   */
+  private async runProcessing(
+    command: ProcessWebhookEventCommand,
+    capture: {
+      event?: RawEvent;
+      endpoint?: import("../../domain/events/entities/Endpoint.js").Endpoint;
+    }
+  ): Promise<ProcessWebhookEventResult> {
     logger.info("Processing webhook event", {
       eventId: command.eventId,
       tenantId: command.tenantId,
@@ -109,6 +163,8 @@ export class ProcessWebhookEvent {
     });
 
     await this.eventRepo.save(event);
+    capture.event = event;
+    capture.endpoint = endpoint;
     endpoint.incrementReceived();
     await this.endpointRepo.update(endpoint);
 
@@ -464,6 +520,14 @@ export class ProcessWebhookEvent {
 }
 
 // ── Domain errors ─────────────────────────────────────────────────────────────
+
+/** Thrown when {@link GLOBAL_PROCESSING_TIMEOUT_MS} elapses (see {@link ProcessWebhookEvent.execute}). */
+export class ProcessingTimeoutError extends Error {
+  constructor() {
+    super("Processing timeout");
+    this.name = "ProcessingTimeoutError";
+  }
+}
 
 export class EndpointNotFoundError extends Error {
   constructor(slug: string, tenantId: string) {
