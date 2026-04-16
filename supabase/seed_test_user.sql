@@ -4,7 +4,7 @@
 -- (y migraciones en supabase/migrations/). Preferimos el script JS: el esquema
 -- de auth.* puede variar entre versiones de Supabase.
 -- =============================================================================
--- Email:    sentinel-test@example.local
+-- Email:    sentinel-test@example.com
 -- Password: SentinelTest123!
 -- =============================================================================
 
