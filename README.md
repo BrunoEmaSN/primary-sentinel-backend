@@ -34,6 +34,7 @@
 | PostgreSQL / MySQL | ❌ | ✅ `INSERT` JSON column via `postgres` / `mysql2` |
 | BigQuery streaming | ❌ | ✅ REST `insertAll` + service account JSON |
 | Encrypted destination secrets | ❌ | ✅ AES-GCM with `SENTINEL_DESTINATION_SECRET_KEY` |
+| Encrypted ingestion artifacts (per tenant) | ❌ | ✅ HKDF + AES-GCM with `SENTINEL_INGESTION_SECRET_KEY` |
 
 ---
 
@@ -119,9 +120,13 @@ wrangler secret put RESEND_API_KEY
 wrangler secret put SENTINEL_WEBHOOK_SECRET
 # Strongly recommended in production: 32-byte key as base64 (openssl rand -base64 32)
 wrangler secret put SENTINEL_DESTINATION_SECRET_KEY
+# Recommended in production: separate 32-byte base64 root; derives per-tenant keys for event payloads, DLQ (R2), and reinject snapshots
+wrangler secret put SENTINEL_INGESTION_SECRET_KEY
 ```
 
 If `SENTINEL_DESTINATION_SECRET_KEY` is omitted, destination secrets (connection strings, API keys, service account JSON) are stored **in plaintext** in Supabase JSONB.
+
+If `SENTINEL_INGESTION_SECRET_KEY` is omitted, `events.raw_payload` / `validated_payload`, DLQ objects in R2, and `event_snapshots.payload` are stored **without** application-level encryption (legacy/dev behavior). When set, those fields use **AES-GCM** with keys derived via **HKDF-SHA256** from the tenant ID and fixed domain labels, matching the product’s tenant-isolation commitment for persisted ingestion data.
 
 Raise `[limits] cpu_ms` in `wrangler.toml` if dispatching to BigQuery or SQL hits CPU timeouts.
 

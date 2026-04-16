@@ -36,7 +36,8 @@ function buildProcessWebhookUseCase(deps: Dependencies): ProcessWebhookEvent {
     deps.sandboxService,
     deps.outputDispatcher,
     deps.incidentAlerts,
-    deps.tenantInfra
+    deps.tenantInfra,
+    deps.ingestionSecretKey
   );
 }
 

@@ -17,27 +17,68 @@ import type {
 } from "../../../domain/events/entities/Endpoint.js";
 import type { RuleLanguage, RuleStatus } from "../../../domain/healing/entities/TransformationRule.js";
 import { decryptDestinationsWithKey } from "../../utils/destinationSecretsCodec.js";
+import {
+  encryptTenantPayload,
+  decryptTenantPayload,
+  isTenantIngestionCiphertext,
+  TENANT_CRYPTO_INFO_EVENTS,
+} from "../../utils/tenantIngestionCrypto.js";
 
 // ── Event Repository ──────────────────────────────────────────────────────────
 
 export class SupabaseEventRepository implements IEventRepository {
   private client: SupabaseClient;
 
-  constructor(supabaseUrl: string, supabaseKey: string) {
+  constructor(
+    supabaseUrl: string,
+    supabaseKey: string,
+    private readonly ingestionSecretKey?: string
+  ) {
     this.client = createClient(supabaseUrl, supabaseKey);
+  }
+
+  private async encodePayloadColumn(
+    value: unknown,
+    tenantId: string
+  ): Promise<unknown> {
+    if (!this.ingestionSecretKey || value == null) return value;
+    const plain = JSON.stringify(value);
+    return encryptTenantPayload(
+      plain,
+      this.ingestionSecretKey,
+      tenantId,
+      TENANT_CRYPTO_INFO_EVENTS
+    );
+  }
+
+  private async decodePayloadColumn(
+    value: unknown,
+    tenantId: string
+  ): Promise<unknown> {
+    if (!this.ingestionSecretKey || !isTenantIngestionCiphertext(value)) return value;
+    const json = await decryptTenantPayload(
+      value,
+      this.ingestionSecretKey,
+      tenantId,
+      TENANT_CRYPTO_INFO_EVENTS
+    );
+    return JSON.parse(json) as unknown;
   }
 
   async save(event: RawEvent): Promise<void> {
     const s = event.toSnapshot();
+    const tenantId = s["tenantId"] as string;
+    const rawPayload = await this.encodePayloadColumn(s["rawPayload"], tenantId);
+    const validatedPayload = await this.encodePayloadColumn(s["validatedPayload"], tenantId);
     const { error } = await this.client.from("events").insert({
       id: s["id"],
-      tenant_id: s["tenantId"],
+      tenant_id: tenantId,
       endpoint_id: s["endpointId"],
-      raw_payload: s["rawPayload"],
+      raw_payload: rawPayload,
       source: s["source"],
       metadata: s["metadata"],
       status: s["status"],
-      validated_payload: s["validatedPayload"],
+      validated_payload: validatedPayload,
       healing_attempts: s["healingAttempts"],
       error_log: s["errorLog"],
       transformation_rule_id: s["transformationRuleId"],
@@ -52,7 +93,7 @@ export class SupabaseEventRepository implements IEventRepository {
     const { data, error } = await this.client
       .from("events").select("*").eq("id", id).single();
     if (error || !data) return null;
-    return this.hydrateEvent(data as Record<string, unknown>);
+    return await this.hydrateEvent(data as Record<string, unknown>);
   }
 
   async findByTenantAndEndpoint(params: {
@@ -76,17 +117,20 @@ export class SupabaseEventRepository implements IEventRepository {
     const { data, count, error } = await query;
     if (error) throw new DatabaseError(`Failed to query events: ${error.message}`);
 
-    return {
-      events: (data ?? []).map((r) => this.hydrateEvent(r as Record<string, unknown>)),
-      total: count ?? 0,
-    };
+    const rows = data ?? [];
+    const events = await Promise.all(
+      rows.map((r) => this.hydrateEvent(r as Record<string, unknown>))
+    );
+    return { events, total: count ?? 0 };
   }
 
   async updateStatus(event: RawEvent): Promise<void> {
     const s = event.toSnapshot();
+    const tenantId = s["tenantId"] as string;
+    const validatedPayload = await this.encodePayloadColumn(s["validatedPayload"], tenantId);
     const { error } = await this.client.from("events").update({
       status: s["status"],
-      validated_payload: s["validatedPayload"],
+      validated_payload: validatedPayload,
       healing_attempts: s["healingAttempts"],
       error_log: s["errorLog"],
       transformation_rule_id: s["transformationRuleId"],
@@ -108,16 +152,22 @@ export class SupabaseEventRepository implements IEventRepository {
     if (error) throw new DatabaseError(`Failed to delete event: ${error.message}`);
   }
 
-  private hydrateEvent(row: Record<string, unknown>): RawEvent {
+  private async hydrateEvent(row: Record<string, unknown>): Promise<RawEvent> {
+    const tenantId = row["tenant_id"] as string;
+    const rawPayload = await this.decodePayloadColumn(row["raw_payload"], tenantId);
+    const validatedPayload = await this.decodePayloadColumn(
+      row["validated_payload"] ?? null,
+      tenantId
+    );
     return RawEvent.reconstitute({
       id: row["id"] as string,
-      tenantId: row["tenant_id"] as string,
+      tenantId,
       endpointId: row["endpoint_id"] as string,
-      rawPayload: row["raw_payload"],
+      rawPayload,
       source: row["source"] as import("../../../domain/events/entities/RawEvent.js").EventSource,
       metadata: row["metadata"] as import("../../../domain/events/entities/RawEvent.js").EventMetadata,
       status: row["status"] as EventStatus,
-      validatedPayload: row["validated_payload"] ?? null,
+      validatedPayload: validatedPayload ?? null,
       healingAttempts: row["healing_attempts"] as number,
       errorLog: (row["error_log"] as string[]) ?? [],
       transformationRuleId: (row["transformation_rule_id"] as string) ?? null,

@@ -8,6 +8,10 @@ import type {
   INotificationService,
   NotificationPayload,
 } from "../../../application/ports/index.js";
+import {
+  decryptTenantPayload,
+  TENANT_CRYPTO_INFO_DLQ_R2,
+} from "../../utils/tenantIngestionCrypto.js";
 
 // ── Upstash Redis — rule cache ────────────────────────────────────────────────
 
@@ -34,8 +38,13 @@ export class UpstashRuleCache implements IRuleCache {
 
 // ── Cloudflare R2 — Dead Letter Queue storage ─────────────────────────────────
 
+const DLQ_KEY_PREFIX = /^dlq\/([^/]+)\//;
+
 export class R2StorageAdapter implements IStorageService {
-  constructor(private bucket: R2Bucket) {}
+  constructor(
+    private bucket: R2Bucket,
+    private readonly ingestionSecretKey?: string
+  ) {}
 
   async store(key: string, data: unknown): Promise<string> {
     await this.bucket.put(key, JSON.stringify(data, null, 2), {
@@ -47,7 +56,27 @@ export class R2StorageAdapter implements IStorageService {
   async retrieve(key: string): Promise<unknown | null> {
     const obj = await this.bucket.get(key);
     if (!obj) return null;
-    return JSON.parse(await obj.text());
+    const parsed: unknown = JSON.parse(await obj.text());
+    if (
+      this.ingestionSecretKey &&
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>)["__sentinel_dlq_v1"] === "string"
+    ) {
+      const m = key.match(DLQ_KEY_PREFIX);
+      if (!m) return parsed;
+      const tenantId = m[1]!;
+      const enc = (parsed as Record<string, unknown>)["__sentinel_dlq_v1"] as string;
+      const plain = await decryptTenantPayload(
+        enc,
+        this.ingestionSecretKey,
+        tenantId,
+        TENANT_CRYPTO_INFO_DLQ_R2
+      );
+      return JSON.parse(plain) as unknown;
+    }
+    return parsed;
   }
 
   async delete(key: string): Promise<void> {

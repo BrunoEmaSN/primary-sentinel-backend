@@ -29,6 +29,8 @@ export type Dependencies = {
   incidentAlerts: IncidentAlertOrchestrator;
   sandboxService: JSSandboxAdapter;
   outputDispatcher: OutputDispatcher;
+  /** HKDF root for per-tenant encryption of ingestion artifacts (optional in dev). */
+  ingestionSecretKey?: string;
 };
 
 let _deps: Dependencies | null = null;
@@ -36,7 +38,11 @@ let _deps: Dependencies | null = null;
 export function buildDependencies(env: WorkerEnv): Dependencies {
   if (_deps) return _deps;
 
-  const eventRepo = new SupabaseEventRepository(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  const eventRepo = new SupabaseEventRepository(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_KEY,
+    env.SENTINEL_INGESTION_SECRET_KEY
+  );
   const endpointRepo = new SupabaseEndpointRepository(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_KEY,
@@ -44,22 +50,35 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   );
   const ruleRepo = new SupabaseTransformationRuleRepository(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
   const ruleCache = new UpstashRuleCache(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
-  const storageService = new R2StorageAdapter(env.DLQ_BUCKET);
+  const storageService = new R2StorageAdapter(env.DLQ_BUCKET, env.SENTINEL_INGESTION_SECRET_KEY);
   const llmService = new AnthropicLLMAdapter(env.ANTHROPIC_API_KEY);
   const notificationService = new CloudflareEmailNotificationService(
     env.EMAIL,
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_KEY
   );
-  const tenantInfra = new TenantInfraAdapter(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  const tenantInfra = new TenantInfraAdapter(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_KEY,
+    env.SENTINEL_INGESTION_SECRET_KEY
+  );
   const incidentAlerts = new IncidentAlertOrchestrator(notificationService, tenantInfra);
   const sandboxService = new JSSandboxAdapter();
   const outputDispatcher = new OutputDispatcher(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
 
   _deps = {
-    eventRepo, endpointRepo, ruleRepo, ruleCache,
-    storageService, llmService, notificationService, tenantInfra, incidentAlerts,
-    sandboxService, outputDispatcher,
+    eventRepo,
+    endpointRepo,
+    ruleRepo,
+    ruleCache,
+    storageService,
+    llmService,
+    notificationService,
+    tenantInfra,
+    incidentAlerts,
+    sandboxService,
+    outputDispatcher,
+    ingestionSecretKey: env.SENTINEL_INGESTION_SECRET_KEY,
   };
 
   return _deps;

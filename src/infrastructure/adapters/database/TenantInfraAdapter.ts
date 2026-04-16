@@ -1,5 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createLogger } from "../../utils/logger.js";
+import {
+  encryptTenantPayload,
+  decryptTenantPayload,
+  isTenantIngestionCiphertext,
+  TENANT_CRYPTO_INFO_EVENT_SNAPSHOT,
+} from "../../utils/tenantIngestionCrypto.js";
 
 const logger = createLogger("TenantInfra");
 
@@ -28,8 +34,42 @@ const DEFAULTS: TenantSettingsRow = {
 export class TenantInfraAdapter {
   private client: SupabaseClient;
 
-  constructor(supabaseUrl: string, supabaseKey: string) {
+  constructor(
+    supabaseUrl: string,
+    supabaseKey: string,
+    private readonly ingestionSecretKey?: string
+  ) {
     this.client = createClient(supabaseUrl, supabaseKey);
+  }
+
+  private async encodeSnapshotPayload(
+    tenantId: string,
+    payload: unknown
+  ): Promise<unknown> {
+    if (!this.ingestionSecretKey) return payload;
+    const plain = JSON.stringify(payload);
+    return encryptTenantPayload(
+      plain,
+      this.ingestionSecretKey,
+      tenantId,
+      TENANT_CRYPTO_INFO_EVENT_SNAPSHOT
+    );
+  }
+
+  private async decodeSnapshotPayload(
+    tenantId: string,
+    payload: unknown
+  ): Promise<unknown> {
+    if (!this.ingestionSecretKey || !isTenantIngestionCiphertext(payload)) {
+      return payload;
+    }
+    const json = await decryptTenantPayload(
+      payload,
+      this.ingestionSecretKey,
+      tenantId,
+      TENANT_CRYPTO_INFO_EVENT_SNAPSHOT
+    );
+    return JSON.parse(json) as unknown;
   }
 
   async getSettings(tenantId: string): Promise<TenantSettingsRow> {
@@ -132,11 +172,12 @@ export class TenantInfraAdapter {
     createdByEmail: string;
   }): Promise<void> {
     try {
+      const payload = await this.encodeSnapshotPayload(params.tenantId, params.payload);
       await this.client.from("event_snapshots").insert({
         tenant_id: params.tenantId,
         event_id: params.eventId,
         name: params.name,
-        payload: params.payload,
+        payload,
         created_by_email: params.createdByEmail,
       });
     } catch (e) {
@@ -250,7 +291,14 @@ export class TenantInfraAdapter {
       .eq("tenant_id", tenantId)
       .eq("event_id", eventId)
       .order("created_at", { ascending: false });
-    return data ?? [];
+    const rows = data ?? [];
+    return Promise.all(
+      rows.map(async (row) => {
+        const r = row as Record<string, unknown>;
+        const payload = await this.decodeSnapshotPayload(tenantId, r["payload"]);
+        return { ...r, payload };
+      })
+    );
   }
 
   async getSnapshotById(tenantId: string, snapshotId: string): Promise<unknown | null> {
@@ -260,7 +308,10 @@ export class TenantInfraAdapter {
       .eq("tenant_id", tenantId)
       .eq("id", snapshotId)
       .maybeSingle();
-    return data ?? null;
+    if (!data) return null;
+    const r = data as Record<string, unknown>;
+    const payload = await this.decodeSnapshotPayload(tenantId, r["payload"]);
+    return { ...r, payload };
   }
 
   async listMaintenanceWindows(tenantId: string): Promise<unknown[]> {

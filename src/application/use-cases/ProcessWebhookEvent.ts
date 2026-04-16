@@ -18,6 +18,10 @@ import {
   hashFingerprint,
 } from "../../infrastructure/utils/crypto.js";
 import { createLogger } from "../../infrastructure/utils/logger.js";
+import {
+  encryptTenantPayload,
+  TENANT_CRYPTO_INFO_DLQ_R2,
+} from "../../infrastructure/utils/tenantIngestionCrypto.js";
 
 const logger = createLogger("ProcessWebhookEvent");
 
@@ -63,7 +67,8 @@ export class ProcessWebhookEvent {
     private readonly sandboxService: ISandboxService,
     private readonly outputDispatcher: OutputDispatcher,
     private readonly incidentAlerts: IncidentAlertOrchestrator,
-    private readonly tenantInfra?: TenantInfraAdapter
+    private readonly tenantInfra?: TenantInfraAdapter,
+    private readonly ingestionSecretKey?: string
   ) {}
 
   async execute(
@@ -433,8 +438,21 @@ export class ProcessWebhookEvent {
     endpoint.incrementDead();
     await this.endpointRepo.update(endpoint);
 
+    const snapshot = event.toSnapshot();
+    const dlqBody =
+      this.ingestionSecretKey != null && this.ingestionSecretKey !== ""
+        ? {
+            __sentinel_dlq_v1: await encryptTenantPayload(
+              JSON.stringify(snapshot),
+              this.ingestionSecretKey,
+              event.tenantId,
+              TENANT_CRYPTO_INFO_DLQ_R2
+            ),
+          }
+        : snapshot;
+
     await this.storageService
-      .store(`dlq/${event.tenantId}/${event.id}.json`, event.toSnapshot())
+      .store(`dlq/${event.tenantId}/${event.id}.json`, dlqBody)
       .catch((e) => logger.error("Failed to store DLQ payload", { error: e }));
 
     const rl = reason.toLowerCase();
