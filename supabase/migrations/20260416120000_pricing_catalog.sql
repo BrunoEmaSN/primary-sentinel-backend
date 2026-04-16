@@ -44,13 +44,13 @@ ON CONFLICT (plan_key) DO UPDATE SET
   currency = EXCLUDED.currency,
   updated_at = now();
 
--- Ejemplo: usuarios nuevos, 25% en facturación anual el primer año (planes de pago)
+-- Ejemplo: usuarios nuevos, 20% en facturación anual el primer año (planes de pago)
 INSERT INTO pricing_discounts (code, label, description, percent_off, billing_period, applies_to_plan_keys, eligibility, sort_order)
 VALUES (
   'new_user_annual_first_year',
   'Bienvenida anual',
-  '25% de descuento para cuentas nuevas en suscripción anual durante el primer año (Profesional y Empresa).',
-  25.00,
+  '20% de descuento para cuentas nuevas en suscripción anual durante el primer año (Profesional y Empresa).',
+  20.00,
   'yearly',
   ARRAY['professional', 'enterprise']::text[],
   '{"new_tenant_only": true, "first_subscription_year_only": true}'::jsonb,
