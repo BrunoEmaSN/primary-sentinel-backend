@@ -66,9 +66,32 @@ const supabase = createClient(url, key, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const email = process.env.SEED_TEST_EMAIL || DEFAULT_EMAIL;
+const emailRaw = process.env.SEED_TEST_EMAIL || DEFAULT_EMAIL;
+const email = emailRaw.trim().toLowerCase();
 const password = process.env.SEED_TEST_PASSWORD || DEFAULT_PASSWORD;
 const fullName = process.env.SEED_TEST_FULL_NAME || DEFAULT_FULL_NAME;
+
+function isDuplicateUserError(msg) {
+  return /already|registered|exists|duplicate/i.test(msg);
+}
+
+async function findUserIdByEmail(supabaseClient, targetEmail) {
+  const want = targetEmail.toLowerCase();
+  let page = 1;
+  const perPage = 200;
+  for (;;) {
+    const { data, error: listErr } = await supabaseClient.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (listErr) throw listErr;
+    const users = data?.users ?? [];
+    const hit = users.find((u) => (u.email ?? "").toLowerCase() === want);
+    if (hit) return hit.id;
+    if (users.length < perPage) return null;
+    page += 1;
+  }
+}
 
 const { data, error } = await supabase.auth.admin.createUser({
   email,
@@ -79,8 +102,33 @@ const { data, error } = await supabase.auth.admin.createUser({
 
 if (error) {
   const msg = error.message || String(error);
-  if (/already|registered|exists|duplicate/i.test(msg)) {
-    console.log(`El usuario ${email} ya existe. No se creó nada nuevo.`);
+  if (isDuplicateUserError(msg)) {
+    const userId = await findUserIdByEmail(supabase, email);
+    if (!userId) {
+      console.error(
+        "El email parece duplicado pero no se encontró el usuario al listar. Revisá el proyecto en Supabase."
+      );
+      process.exit(1);
+    }
+    const { error: upErr } = await supabase.auth.admin.updateUserById(userId, {
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName },
+    });
+    if (upErr) {
+      console.error("No se pudo actualizar la contraseña del usuario:", upErr.message);
+      process.exit(1);
+    }
+    console.log(`Usuario ${email} ya existía; contraseña y email confirmado actualizados.`);
+    console.log("  id:", userId);
+    console.log("  contraseña:", password);
+    console.log("");
+    console.log("Proyecto Supabase (debe coincidir con NEXT_PUBLIC_SUPABASE_URL del frontend):");
+    console.log(" ", url);
+    console.log("");
+    console.log(
+      "En el frontend, iniciá sesión con ese email y contraseña; el Bearer JWT usará tenantId = id."
+    );
     process.exit(0);
   }
   console.error("Error al crear usuario:", msg);
@@ -93,6 +141,9 @@ console.log("  id:", user.id);
 console.log("  email:", user.email);
 console.log("  contraseña:", password);
 console.log("");
+console.log("Proyecto Supabase (debe coincidir con NEXT_PUBLIC_SUPABASE_URL del frontend):");
+console.log(" ", url);
+console.log("");
 console.log(
-  "En el frontend, inicia sesión con ese email y contraseña; el Bearer JWT usará tenantId = id."
+  "En el frontend, iniciá sesión con ese email y contraseña; el Bearer JWT usará tenantId = id."
 );
