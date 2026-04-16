@@ -67,6 +67,14 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       });
     }
 
+    if (path === "/api/public/pricing" && method === "GET") {
+      return await handlePublicPricing(deps);
+    }
+
+    if (path === "/api/public/negotiation-policy" && method === "GET") {
+      return await handlePublicNegotiationPolicy(deps);
+    }
+
     const authResult = await authenticateRequest(request, env);
     if (authResult instanceof Response) return authResult;
     const auth = authResult as AuthContext;
@@ -665,5 +673,36 @@ async function handleBillingStatus(auth: AuthContext, deps: Dependencies): Promi
     stripeCustomerId: s.billing_plan === "pro" ? "(configurar Stripe — Fase 9)" : null,
     portalUrl: null,
     note: "Facturación self-service en roadmap; límites del plan free aplicados en la API.",
+  });
+}
+
+async function handlePublicPricing(deps: Dependencies): Promise<Response> {
+  const catalog = await deps.tenantInfra.getPricingCatalog();
+  const pro = catalog.plans.find((p) => p.planKey === "professional");
+  let yearlyCommitmentSavingsPercent: number | null = null;
+  if (pro && pro.monthlyUsd > 0) {
+    yearlyCommitmentSavingsPercent = Math.round((1 - pro.yearlyPerMonthUsd / pro.monthlyUsd) * 100);
+  }
+  return jsonResponse({
+    ...catalog,
+    yearlyCommitmentSavingsPercent,
+  });
+}
+
+/** Política de negociación IA: pisos, concesiones, rondas, multiplicadores de urgencia (sin JWT). */
+async function handlePublicNegotiationPolicy(deps: Dependencies): Promise<Response> {
+  const policy = await deps.tenantInfra.getNegotiationPolicy();
+  return jsonResponse({
+    ...policy,
+    framework: {
+      version: "1.0",
+      steps: [
+        "profile_and_power_band",
+        "discount_trigger_and_value_tables",
+        "conditional_counter_offer",
+        "value_argument_copy",
+        "validate_and_send_or_escalate",
+      ],
+    },
   });
 }

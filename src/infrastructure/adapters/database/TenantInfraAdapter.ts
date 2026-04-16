@@ -9,6 +9,40 @@ import {
 
 const logger = createLogger("TenantInfra");
 
+export type PublicPricingPlan = {
+  planKey: string;
+  sortOrder: number;
+  monthlyUsd: number;
+  yearlyPerMonthUsd: number;
+  currency: string;
+  /** Precio piso (USD/mes o equivalente); por debajo la IA debe escalar a humano. */
+  floorMonthlyUsd: number;
+  floorYearlyPerMonthUsd: number;
+};
+
+export type NegotiationConcessionRow = {
+  code: string;
+  label: string;
+  description: string | null;
+  kind: string;
+};
+
+export type NegotiationControlRow = {
+  maxNegotiationRounds: number;
+  urgencyMultipliers: Record<string, number>;
+  powerBandMaxDiscount: Record<string, number>;
+};
+
+export type PublicPricingDiscount = {
+  code: string;
+  label: string;
+  description: string | null;
+  percentOff: number;
+  billingPeriod: string;
+  appliesToPlanKeys: string[] | null;
+  eligibility: Record<string, unknown>;
+};
+
 export type TenantSettingsRow = {
   notify_email_healing: boolean;
   notify_email_dead: boolean;
@@ -360,5 +394,124 @@ export class TenantInfraAdapter {
       .eq("tenant_id", tenantId)
       .eq("id", id);
     if (error) throw new Error(error.message);
+  }
+
+  /** Catálogo público de precios (landing / facturación). Sin JWT. */
+  async getPricingCatalog(): Promise<{
+    plans: PublicPricingPlan[];
+    discounts: PublicPricingDiscount[];
+  }> {
+    try {
+      const [plansRes, discRes] = await Promise.all([
+        this.client
+          .from("pricing_plans")
+          .select(
+            "plan_key, sort_order, monthly_amount_usd, yearly_per_month_usd, currency, floor_monthly_usd, floor_yearly_per_month_usd"
+          )
+          .eq("active", true)
+          .order("sort_order", { ascending: true }),
+        this.client
+          .from("pricing_discounts")
+          .select("code, label, description, percent_off, billing_period, applies_to_plan_keys, eligibility")
+          .eq("active", true)
+          .order("sort_order", { ascending: true }),
+      ]);
+      if (plansRes.error) {
+        logger.warn("pricing_plans", { error: plansRes.error.message });
+      }
+      if (discRes.error) {
+        logger.warn("pricing_discounts", { error: discRes.error.message });
+      }
+      const plans: PublicPricingPlan[] = (plansRes.data ?? []).map((row: Record<string, unknown>) => ({
+        planKey: String(row["plan_key"] ?? ""),
+        sortOrder: Number(row["sort_order"] ?? 0),
+        monthlyUsd: Number(row["monthly_amount_usd"] ?? 0),
+        yearlyPerMonthUsd: Number(row["yearly_per_month_usd"] ?? 0),
+        currency: String(row["currency"] ?? "USD"),
+        floorMonthlyUsd: Number(row["floor_monthly_usd"] ?? row["monthly_amount_usd"] ?? 0),
+        floorYearlyPerMonthUsd: Number(row["floor_yearly_per_month_usd"] ?? row["yearly_per_month_usd"] ?? 0),
+      }));
+      const discounts: PublicPricingDiscount[] = (discRes.data ?? []).map((row: Record<string, unknown>) => ({
+        code: String(row["code"] ?? ""),
+        label: String(row["label"] ?? ""),
+        description: row["description"] != null ? String(row["description"]) : null,
+        percentOff: Number(row["percent_off"] ?? 0),
+        billingPeriod: String(row["billing_period"] ?? "both"),
+        appliesToPlanKeys: Array.isArray(row["applies_to_plan_keys"])
+          ? (row["applies_to_plan_keys"] as string[])
+          : null,
+        eligibility:
+          row["eligibility"] != null &&
+          typeof row["eligibility"] === "object" &&
+          !Array.isArray(row["eligibility"])
+            ? (row["eligibility"] as Record<string, unknown>)
+            : {},
+      }));
+      return { plans, discounts };
+    } catch (e) {
+      logger.warn("getPricingCatalog failed", { error: String(e) });
+      return { plans: [], discounts: [] };
+    }
+  }
+
+  /**
+   * Política completa para IA de ventas/negociación: precios con piso, promos, concesiones give-to-get y límites.
+   * GET público sin JWT.
+   */
+  async getNegotiationPolicy(): Promise<{
+    plans: PublicPricingPlan[];
+    discounts: PublicPricingDiscount[];
+    concessions: NegotiationConcessionRow[];
+    control: NegotiationControlRow;
+  }> {
+    const catalog = await this.getPricingCatalog();
+    const defaults: NegotiationControlRow = {
+      maxNegotiationRounds: 3,
+      urgencyMultipliers: { high: 0.5, medium: 0.75, low: 1 },
+      powerBandMaxDiscount: { startup: 0.18, smb: 0.12, multinational: 0.08, unknown: 0.1 },
+    };
+    try {
+      const [concRes, ctrlRes] = await Promise.all([
+        this.client
+          .from("negotiation_concessions")
+          .select("code, label, description, kind")
+          .eq("active", true)
+          .order("sort_order", { ascending: true }),
+        this.client.from("negotiation_control").select("*").eq("id", 1).maybeSingle(),
+      ]);
+      if (concRes.error) logger.warn("negotiation_concessions", { error: concRes.error.message });
+      if (ctrlRes.error) logger.warn("negotiation_control", { error: ctrlRes.error.message });
+
+      const concessions: NegotiationConcessionRow[] = (concRes.data ?? []).map((row: Record<string, unknown>) => ({
+        code: String(row["code"] ?? ""),
+        label: String(row["label"] ?? ""),
+        description: row["description"] != null ? String(row["description"]) : null,
+        kind: String(row["kind"] ?? "non_monetary"),
+      }));
+
+      const row = ctrlRes.data as Record<string, unknown> | null;
+      let control = defaults;
+      if (row) {
+        const maxRounds = Number(row["max_negotiation_rounds"] ?? 3);
+        const um = row["urgency_multipliers"];
+        const pb = row["power_band_max_discount"];
+        control = {
+          maxNegotiationRounds: Number.isFinite(maxRounds) && maxRounds > 0 ? maxRounds : defaults.maxNegotiationRounds,
+          urgencyMultipliers:
+            um != null && typeof um === "object" && !Array.isArray(um)
+              ? { ...defaults.urgencyMultipliers, ...(um as Record<string, number>) }
+              : defaults.urgencyMultipliers,
+          powerBandMaxDiscount:
+            pb != null && typeof pb === "object" && !Array.isArray(pb)
+              ? { ...defaults.powerBandMaxDiscount, ...(pb as Record<string, number>) }
+              : defaults.powerBandMaxDiscount,
+        };
+      }
+
+      return { ...catalog, concessions, control };
+    } catch (e) {
+      logger.warn("getNegotiationPolicy failed", { error: String(e) });
+      return { ...catalog, concessions: [], control: defaults };
+    }
   }
 }
