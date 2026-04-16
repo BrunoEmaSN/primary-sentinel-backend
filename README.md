@@ -16,27 +16,6 @@
 </div>
 
 > **Autonomous Reliability & Security Intelligence** — zero-downtime webhooks that auto-detect, fix, and learn from schema mutations.  
-> **v2 adds multi-destination fanout**: send validated payloads to Supabase + any webhook/API simultaneously.
-
----
-
-## What's new in v2
-
-| Feature | v1 | v2 |
-|---|---|---|
-| Destinations per endpoint | 1 | Up to 5 (fanout) |
-| Webhook relay | ❌ | ✅ POST to any URL |
-| HTTP API with auth | ❌ | ✅ Bearer / Basic / API Key |
-| Per-destination observability | ❌ | ✅ `dispatchResults` in every event |
-| Partial failure handling | ❌ | ✅ `Promise.allSettled` — one fail ≠ DLQ |
-| Backwards compat (`destination`) | — | ✅ auto-migrated to `destinations[]` |
-| External Supabase project | ❌ | ✅ `projectUrl` + `serviceKey` (or `apiKey` alias) |
-| PostgreSQL / MySQL | ❌ | ✅ `INSERT` JSON column via `postgres` / `mysql2` |
-| BigQuery streaming | ❌ | ✅ REST `insertAll` + service account JSON |
-| Encrypted destination secrets | ❌ | ✅ AES-GCM with `SENTINEL_DESTINATION_SECRET_KEY` |
-| Encrypted ingestion artifacts (per tenant) | ❌ | ✅ HKDF + AES-GCM with `SENTINEL_INGESTION_SECRET_KEY` |
-
----
 
 ## Architecture
 
