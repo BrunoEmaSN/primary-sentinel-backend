@@ -44,7 +44,7 @@ ON CONFLICT (plan_key) DO UPDATE SET
   currency = EXCLUDED.currency,
   updated_at = now();
 
--- Ejemplo: usuarios nuevos, 15% en facturación anual el primer año (planes de pago)
+-- Ejemplo: usuarios nuevos, 25% en facturación anual el primer año (planes de pago)
 INSERT INTO pricing_discounts (code, label, description, percent_off, billing_period, applies_to_plan_keys, eligibility, sort_order)
 VALUES (
   'new_user_annual_first_year',
