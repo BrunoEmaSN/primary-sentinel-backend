@@ -174,7 +174,11 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
     return errorResponse("Not found", 404);
   } catch (e) {
-    logger.error("Unhandled error", { error: e, path, method });
+    const errInfo =
+      e instanceof Error
+        ? { name: e.name, message: e.message, stack: e.stack }
+        : { value: String(e) };
+    logger.error("Unhandled error", { error: errInfo, path, method });
     return errorResponse(e instanceof Error ? e.message : "Internal server error", 500);
   }
 }

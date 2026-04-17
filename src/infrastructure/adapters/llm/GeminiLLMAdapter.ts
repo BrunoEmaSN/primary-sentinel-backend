@@ -1,10 +1,10 @@
-// src/infrastructure/adapters/llm/AnthropicLLMAdapter.ts
+// src/infrastructure/adapters/llm/GeminiLLMAdapter.ts
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ILLMService, HealingRequest, HealingResult } from "../../../application/ports/index.js";
 import { createLogger } from "../../utils/logger.js";
 
-const logger = createLogger("AnthropicLLMAdapter");
+const logger = createLogger("GeminiLLMAdapter");
 
 /** Below this threshold the script is not executed in the sandbox (event goes to DLQ). */
 const MIN_SANDBOX_CONFIDENCE = 0.4;
@@ -37,40 +37,50 @@ Example output:
   "confidence": 0.95
 }`;
 
-export class AnthropicLLMAdapter implements ILLMService {
-  private client: Anthropic;
-  private model = "claude-sonnet-4-20250514";
+/** Google AI Studio / Gemini API — flash tier for latency and cost. */
+const MODEL_ID = "gemini-2.0-flash";
+
+export class GeminiLLMAdapter implements ILLMService {
+  private readonly model;
 
   constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+    const genAI = new GoogleGenerativeAI(apiKey);
+    this.model = genAI.getGenerativeModel({
+      model: MODEL_ID,
+      systemInstruction: SYSTEM_PROMPT,
+    });
   }
 
   async generateTransformationScript(request: HealingRequest): Promise<HealingResult> {
     const userMessage = this.buildPrompt(request);
-    logger.info("Calling Anthropic API for transformation generation");
+    logger.info("Calling Gemini API for transformation generation");
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
+    const result = await this.model.generateContent(userMessage);
+    const response = result.response;
+    const rawText = response.text();
+
+    const usage = response.usageMetadata;
+    logger.info("LLM response received", {
+      promptTokenCount: usage?.promptTokenCount,
+      candidatesTokenCount: usage?.candidatesTokenCount,
     });
 
-    const rawText = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { type: "text"; text: string }).text)
-      .join("");
+    const parsed = this.parseResponse(rawText);
 
-    logger.info("LLM response received", { usage: response.usage });
-    const result = this.parseResponse(rawText);
-
-    if (result.confidence < MIN_SANDBOX_CONFIDENCE) {
+    if (parsed.confidence < MIN_SANDBOX_CONFIDENCE) {
       throw new LLMLowConfidenceError(
-        `LLM confidence too low: ${result.confidence}. Sending to DLQ.`
+        `LLM confidence too low: ${parsed.confidence}. Sending to DLQ.`
       );
     }
 
-    return result;
+    return {
+      success: true,
+      script: parsed.script,
+      description: parsed.description,
+      language: parsed.language,
+      confidence: parsed.confidence,
+      modelUsed: MODEL_ID,
+    };
   }
 
   private buildPrompt(request: HealingRequest): string {
@@ -89,7 +99,12 @@ ${request.validationErrors.map((e, i) => `${i + 1}. ${e}`).join("\n")}
 Generate a JavaScript transformation to fix the received payload into the expected schema.`;
   }
 
-  private parseResponse(rawText: string): HealingResult {
+  private parseResponse(rawText: string): {
+    script: string;
+    description: string;
+    language: "javascript" | "json-map";
+    confidence: number;
+  } {
     const cleaned = rawText
       .replace(/```json\n?/gi, "")
       .replace(/```\n?/gi, "")
@@ -114,12 +129,10 @@ Generate a JavaScript transformation to fix the received payload into the expect
     }
 
     return {
-      success: true,
       script: parsed.script,
       description: parsed.description ?? "AI-generated transformation",
       language: parsed.language ?? "javascript",
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
-      modelUsed: this.model,
     };
   }
 }

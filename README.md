@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/-Supabase-black?style=for-the-badge&logo=supabase&logoColor=3CC88B&color=000000" alt="supabase" />
     <img src="https://img.shields.io/badge/-Cloudflare-black?style=for-the-badge&logo=cloudflare&logoColor=EB7D20&color=000000" alt="cloudflare" />
     <img src="https://img.shields.io/badge/-Mysql-black?style=for-the-badge&logo=mysql&color=000000" alt="mysql" />
-    <img src="https://img.shields.io/badge/-Claude-black?style=for-the-badge&logo=claude&color=000000" alt="claude" />
+    <img src="https://img.shields.io/badge/-Gemini-black?style=for-the-badge&logo=googlegemini&color=000000" alt="gemini" />
   </div>
   
   <h3 align="center">
@@ -92,7 +92,7 @@ Copy the KV IDs into `wrangler.toml`.
 ```bash
 wrangler secret put SUPABASE_URL
 wrangler secret put SUPABASE_SERVICE_KEY
-wrangler secret put ANTHROPIC_API_KEY
+wrangler secret put AI_API_KEY
 wrangler secret put UPSTASH_REDIS_REST_URL
 wrangler secret put UPSTASH_REDIS_REST_TOKEN
 wrangler secret put RESEND_API_KEY
@@ -262,5 +262,5 @@ GET    /api/dlq                    # Dead letter queue
 | Database | Supabase (PostgreSQL) | Events, Endpoints, Rules, Auth |
 | Cache | Upstash Redis | Transformation rule cache (24h TTL) |
 | Storage | Cloudflare R2 | Dead Letter Queue payloads |
-| LLM | Anthropic Claude Sonnet | Generating transformation scripts |
+| LLM | Google Gemini (flash) | Generating transformation scripts |
 | Email | Resend | Healing & DLQ notifications |

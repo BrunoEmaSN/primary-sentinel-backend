@@ -13,7 +13,7 @@ import {
 } from "./adapters/external/ExternalAdapters.js";
 import { TenantInfraAdapter } from "./adapters/database/TenantInfraAdapter.js";
 import { IncidentAlertOrchestrator } from "./notifications/IncidentAlertOrchestrator.js";
-import { AnthropicLLMAdapter } from "./adapters/llm/AnthropicLLMAdapter.js";
+import { GeminiLLMAdapter } from "./adapters/llm/GeminiLLMAdapter.js";
 import { JSSandboxAdapter } from "./adapters/sandbox/JSSandboxAdapter.js";
 import { OutputDispatcher } from "../application/use-cases/OutputDispatcher.js";
 
@@ -23,7 +23,7 @@ export type Dependencies = {
   ruleRepo: SupabaseTransformationRuleRepository;
   ruleCache: UpstashRuleCache;
   storageService: R2StorageAdapter;
-  llmService: AnthropicLLMAdapter;
+  llmService: GeminiLLMAdapter;
   notificationService: CloudflareEmailNotificationService;
   tenantInfra: TenantInfraAdapter;
   incidentAlerts: IncidentAlertOrchestrator;
@@ -51,7 +51,7 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   const ruleRepo = new SupabaseTransformationRuleRepository(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
   const ruleCache = new UpstashRuleCache(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
   const storageService = new R2StorageAdapter(env.DLQ_BUCKET, env.SENTINEL_INGESTION_SECRET_KEY);
-  const llmService = new AnthropicLLMAdapter(env.ANTHROPIC_API_KEY);
+  const llmService = new GeminiLLMAdapter(env.AI_API_KEY);
   const notificationService = new CloudflareEmailNotificationService(
     env.EMAIL,
     env.SUPABASE_URL,

@@ -18,7 +18,8 @@ export type WorkerEnv = {
   SENTINEL_DESTINATION_SECRET_KEY?: string;
   /** Base64-encoded 32-byte root for HKDF; encrypts ingestion payloads (events, DLQ R2, snapshots) per tenant */
   SENTINEL_INGESTION_SECRET_KEY?: string;
-  ANTHROPIC_API_KEY: string;
+  /** Google AI Studio API key (Gemini) for healing / transformation generation */
+  AI_API_KEY: string;
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
   EMAIL: SendEmail;

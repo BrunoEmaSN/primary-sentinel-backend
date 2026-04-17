@@ -78,7 +78,7 @@ function makeDeps() {
       description: "Maps user_id → id and full_name → name",
       language: "javascript",
       confidence: 0.95,
-      modelUsed: "claude-sonnet-4-20250514",
+      modelUsed: "gemini-2.0-flash",
     }),
   };
 

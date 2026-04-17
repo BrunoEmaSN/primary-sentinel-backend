@@ -8,8 +8,9 @@
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=eyJhb...   # Project Settings > API > service_role key
 
-# ── Anthropic (HealingAgent LLM) ─────────────────────────
-ANTHROPIC_API_KEY=sk-ant-...
+# ── Google Gemini (HealingAgent LLM) ─────────────────────
+# https://aistudio.google.com/apikey
+AI_API_KEY=...
 
 # ── Upstash Redis (Rule Cache) ────────────────────────────
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io

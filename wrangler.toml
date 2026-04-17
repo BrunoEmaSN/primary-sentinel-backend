@@ -30,7 +30,7 @@ vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://s
 # SUPABASE_SERVICE_KEY
 # SENTINEL_DESTINATION_SECRET_KEY — base64-encoded 32-byte AES key (openssl rand -base64 32) for encrypting destination secrets in DB
 # SENTINEL_INGESTION_SECRET_KEY — same format; HKDF per tenant_id encrypts event payloads (Supabase), DLQ copies (R2), and event_snapshots
-# ANTHROPIC_API_KEY
+# AI_API_KEY (Google AI Studio / Gemini)
 # UPSTASH_REDIS_REST_URL
 # UPSTASH_REDIS_REST_TOKEN
 # SENTINEL_WEBHOOK_SECRET
