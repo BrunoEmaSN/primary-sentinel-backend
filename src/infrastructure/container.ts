@@ -51,7 +51,9 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   const ruleRepo = new SupabaseTransformationRuleRepository(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
   const ruleCache = new UpstashRuleCache(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
   const storageService = new R2StorageAdapter(env.DLQ_BUCKET, env.SENTINEL_INGESTION_SECRET_KEY);
-  const llmService = new GeminiLLMAdapter(env.AI_API_KEY);
+  const llmService = new GeminiLLMAdapter(env.AI_API_KEY, {
+    modelId: env.GEMINI_MODEL,
+  });
   const notificationService = new CloudflareEmailNotificationService(
     env.EMAIL,
     env.SUPABASE_URL,

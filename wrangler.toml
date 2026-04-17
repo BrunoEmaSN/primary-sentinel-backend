@@ -4,7 +4,7 @@ main = "workers/main.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug", WORKER_URL = "http://localhost:8787" }
+vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug", WORKER_URL = "http://localhost:8787", GEMINI_MODEL = "gemini-2.5-flash" }
 
 [[kv_namespaces]]
 binding = "RULE_CACHE"
@@ -23,7 +23,7 @@ name = "EMAIL"
 # Align with NEXT_PUBLIC_SITE_URL on Vercel. Each Vercel preview URL needs its own entry unless you use a single custom domain.
 [env.production]
 name = "sentinel-saas-prod"
-vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app" }
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app", GEMINI_MODEL = "gemini-2.5-flash" }
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
@@ -31,6 +31,7 @@ vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://s
 # SENTINEL_DESTINATION_SECRET_KEY — base64-encoded 32-byte AES key (openssl rand -base64 32) for encrypting destination secrets in DB
 # SENTINEL_INGESTION_SECRET_KEY — same format; HKDF per tenant_id encrypts event payloads (Supabase), DLQ copies (R2), and event_snapshots
 # AI_API_KEY (Google AI Studio / Gemini)
+# Optional: GEMINI_MODEL as [vars] — default is gemini-2.5-flash
 # UPSTASH_REDIS_REST_URL
 # UPSTASH_REDIS_REST_TOKEN
 # SENTINEL_WEBHOOK_SECRET

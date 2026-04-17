@@ -103,6 +103,8 @@ wrangler secret put SENTINEL_DESTINATION_SECRET_KEY
 wrangler secret put SENTINEL_INGESTION_SECRET_KEY
 ```
 
+The Worker defaults to **`gemini-2.5-flash`** via `[vars]` in `wrangler.toml` (Google has retired bare `gemini-1.5-flash` — it returns **404**). If a **different** `GEMINI_MODEL` returns **404** or **429**, the adapter **switches once to the default model without waiting**, then uses normal backoff only if rate limits persist. Webhook processing uses a **180s** wall-clock budget by default; tune with **`WEBHOOK_PROCESSING_TIMEOUT_MS`** (clamped 15s–5min).
+
 If `SENTINEL_DESTINATION_SECRET_KEY` is omitted, destination secrets (connection strings, API keys, service account JSON) are stored **in plaintext** in Supabase JSONB.
 
 If `SENTINEL_INGESTION_SECRET_KEY` is omitted, `events.raw_payload` / `validated_payload`, DLQ objects in R2, and `event_snapshots.payload` are stored **without** application-level encryption (legacy/dev behavior). When set, those fields use **AES-GCM** with keys derived via **HKDF-SHA256** from the tenant ID and fixed domain labels, matching the product’s tenant-isolation commitment for persisted ingestion data.

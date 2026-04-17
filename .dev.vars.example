@@ -11,6 +11,10 @@ SUPABASE_SERVICE_KEY=eyJhb...   # Project Settings > API > service_role key
 # ── Google Gemini (HealingAgent LLM) ─────────────────────
 # https://aistudio.google.com/apikey
 AI_API_KEY=...
+# Opcional — wrangler.toml usa gemini-2.5-flash; cambia solo si tu proyecto requiere otro id (ListModels en AI Studio)
+# GEMINI_MODEL=gemini-2.5-flash
+# Opcional — tiempo máx. de un webhook (ms), por defecto 180000
+# WEBHOOK_PROCESSING_TIMEOUT_MS=180000
 
 # ── Upstash Redis (Rule Cache) ────────────────────────────
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io

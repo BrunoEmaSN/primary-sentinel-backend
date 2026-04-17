@@ -20,6 +20,10 @@ export type WorkerEnv = {
   SENTINEL_INGESTION_SECRET_KEY?: string;
   /** Google AI Studio API key (Gemini) for healing / transformation generation */
   AI_API_KEY: string;
+  /** Optional Gemini model id (default: gemini-2.5-flash). Set in wrangler vars or .dev.vars */
+  GEMINI_MODEL?: string;
+  /** Optional wall-clock ms for one webhook run (default 180000). Clamped 15s–5min. */
+  WEBHOOK_PROCESSING_TIMEOUT_MS?: string;
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
   EMAIL: SendEmail;

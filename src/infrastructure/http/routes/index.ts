@@ -25,7 +25,14 @@ import { createLogger } from "../../utils/logger.js";
 
 const logger = createLogger("Router");
 
-function buildProcessWebhookUseCase(deps: Dependencies): ProcessWebhookEvent {
+function parseWebhookProcessingTimeoutMs(env: WorkerEnv): number | undefined {
+  const raw = env.WEBHOOK_PROCESSING_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+function buildProcessWebhookUseCase(deps: Dependencies, env: WorkerEnv): ProcessWebhookEvent {
   return new ProcessWebhookEvent(
     deps.eventRepo,
     deps.endpointRepo,
@@ -37,7 +44,8 @@ function buildProcessWebhookUseCase(deps: Dependencies): ProcessWebhookEvent {
     deps.outputDispatcher,
     deps.incidentAlerts,
     deps.tenantInfra,
-    deps.ingestionSecretKey
+    deps.ingestionSecretKey,
+    parseWebhookProcessingTimeoutMs(env)
   );
 }
 
@@ -105,7 +113,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     if (path.match(/^\/api\/dlq\/[\w-]+\/reinject$/) && method === "POST") {
       const eventId = path.split("/")[3]!;
-      return await handleReinjectDlq(eventId, request, auth, deps);
+      return await handleReinjectDlq(eventId, request, auth, deps, env);
     }
     if (path.match(/^\/api\/dlq\/[\w-]+$/) && method === "DELETE") {
       const eventId = path.split("/").pop()!;
@@ -223,7 +231,7 @@ async function handleWebhook(
     requestHeaders[key] = value;
   });
 
-  const useCase = buildProcessWebhookUseCase(deps);
+  const useCase = buildProcessWebhookUseCase(deps, env);
 
   const result = await useCase.execute({
     eventId,
@@ -435,7 +443,8 @@ async function handleReinjectDlq(
   eventId: string,
   request: Request,
   auth: AuthContext,
-  deps: Dependencies
+  deps: Dependencies,
+  env: WorkerEnv
 ): Promise<Response> {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const correctedPayload = body["correctedPayload"] as Record<string, unknown> | undefined;
@@ -444,7 +453,7 @@ async function handleReinjectDlq(
   const uc = new ReinjectDlqEvent(
     deps.eventRepo,
     deps.endpointRepo,
-    buildProcessWebhookUseCase(deps),
+    buildProcessWebhookUseCase(deps, env),
     deps.tenantInfra
   );
   try {

@@ -1,6 +1,6 @@
 // src/infrastructure/adapters/llm/GeminiLLMAdapter.ts
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type GenerativeModel } from "@google/generative-ai";
 import type { ILLMService, HealingRequest, HealingResult } from "../../../application/ports/index.js";
 import { createLogger } from "../../utils/logger.js";
 
@@ -37,30 +37,95 @@ Example output:
   "confidence": 0.95
 }`;
 
-/** Google AI Studio / Gemini API — flash tier for latency and cost. */
-const MODEL_ID = "gemini-2.0-flash";
+/**
+ * Default flash model for `generateContent`. Older aliases like `gemini-1.5-flash` return 404 on current API.
+ * Override with `GEMINI_MODEL` if needed (`ListModels` in Google AI Studio shows valid ids).
+ */
+export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+
+const MAX_429_ATTEMPTS = 5;
+const MAX_RETRY_WAIT_MS = 90_000;
+
+export type GeminiLLMOptions = {
+  modelId?: string;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("429") ||
+    msg.includes("Too Many Requests") ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    /rate.?limit|quota exceeded/i.test(msg)
+  );
+}
+
+function isModelNotFoundError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("404") &&
+    (/not found for API version|is not found|not supported for generateContent/i.test(msg) ||
+      /models\/[^ ]+ is not found/i.test(msg))
+  );
+}
+
+/** Parses "Please retry in 30.14s" from Google API error bodies. */
+function parseRetryAfterMs(err: unknown): number | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.match(/Please retry in ([\d.]+)s/i);
+  if (!m) return null;
+  return Math.ceil(parseFloat(m[1]) * 1000);
+}
 
 export class GeminiLLMAdapter implements ILLMService {
-  private readonly model;
+  private readonly genAI: GoogleGenerativeAI;
+  /** Active model id (may switch to {@link DEFAULT_GEMINI_MODEL} after 404/429 on a non-default model). */
+  private modelId: string;
+  private model: GenerativeModel;
 
-  constructor(apiKey: string) {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    this.model = genAI.getGenerativeModel({
-      model: MODEL_ID,
+  constructor(apiKey: string, options?: GeminiLLMOptions) {
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.modelId = (options?.modelId?.trim() || DEFAULT_GEMINI_MODEL).trim();
+    this.model = this.createModel();
+  }
+
+  private createModel(): GenerativeModel {
+    return this.genAI.getGenerativeModel({
+      model: this.modelId,
       systemInstruction: SYSTEM_PROMPT,
     });
   }
 
+  /**
+   * If `GEMINI_MODEL` is deprecated, unknown, or rate-limited, switch once to {@link DEFAULT_GEMINI_MODEL}
+   * and retry immediately (no backoff).
+   */
+  private trySwitchToDefaultModel(reason: "404" | "429"): boolean {
+    if (this.modelId === DEFAULT_GEMINI_MODEL) return false;
+    logger.warn(`Gemini ${reason} on configured model; switching to default model without delay`, {
+      from: this.modelId,
+      to: DEFAULT_GEMINI_MODEL,
+    });
+    this.modelId = DEFAULT_GEMINI_MODEL;
+    this.model = this.createModel();
+    return true;
+  }
+
   async generateTransformationScript(request: HealingRequest): Promise<HealingResult> {
     const userMessage = this.buildPrompt(request);
-    logger.info("Calling Gemini API for transformation generation");
+    logger.info("Calling Gemini API for transformation generation", { model: this.modelId });
 
-    const result = await this.model.generateContent(userMessage);
+    const result = await this.generateContentWith429Retries(userMessage);
     const response = result.response;
     const rawText = response.text();
 
     const usage = response.usageMetadata;
     logger.info("LLM response received", {
+      model: this.modelId,
       promptTokenCount: usage?.promptTokenCount,
       candidatesTokenCount: usage?.candidatesTokenCount,
     });
@@ -79,8 +144,46 @@ export class GeminiLLMAdapter implements ILLMService {
       description: parsed.description,
       language: parsed.language,
       confidence: parsed.confidence,
-      modelUsed: MODEL_ID,
+      modelUsed: this.modelId,
     };
+  }
+
+  private async generateContentWith429Retries(userMessage: string) {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_429_ATTEMPTS; attempt++) {
+      try {
+        return await this.model.generateContent(userMessage);
+      } catch (err) {
+        lastErr = err;
+        if (isModelNotFoundError(err) && this.trySwitchToDefaultModel("404")) {
+          attempt -= 1;
+          continue;
+        }
+        if (!isRateLimitError(err)) {
+          throw err;
+        }
+        if (this.trySwitchToDefaultModel("429")) {
+          attempt -= 1;
+          continue;
+        }
+        if (attempt === MAX_429_ATTEMPTS) {
+          throw err;
+        }
+        const fromApi = parseRetryAfterMs(err);
+        const backoff = Math.min(
+          MAX_RETRY_WAIT_MS,
+          fromApi ?? Math.min(60_000, 1000 * 2 ** (attempt - 1))
+        );
+        logger.warn("Gemini rate limited (429), waiting before retry", {
+          attempt,
+          maxAttempts: MAX_429_ATTEMPTS,
+          waitMs: backoff,
+          model: this.modelId,
+        });
+        await sleep(backoff);
+      }
+    }
+    throw lastErr;
   }
 
   private buildPrompt(request: HealingRequest): string {

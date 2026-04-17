@@ -25,8 +25,11 @@ import {
 
 const logger = createLogger("ProcessWebhookEvent");
 
-/** Wall-clock cap for one webhook processing run (below Cloudflare Workers' ~30s limit). */
-const GLOBAL_PROCESSING_TIMEOUT_MS = 28_000;
+/**
+ * Default wall-clock cap for one webhook run. Must exceed Gemini 429 backoff (~45s+) plus
+ * model inference, sandbox, and destination dispatch. Override with `WEBHOOK_PROCESSING_TIMEOUT_MS`.
+ */
+export const DEFAULT_GLOBAL_PROCESSING_TIMEOUT_MS = 180_000;
 
 export type ProcessWebhookEventCommand = {
   eventId: string;
@@ -57,6 +60,8 @@ export type ProcessWebhookEventResult = {
 };
 
 export class ProcessWebhookEvent {
+  private readonly processingTimeoutMs: number;
+
   constructor(
     private readonly eventRepo: IEventRepository,
     private readonly endpointRepo: IEndpointRepository,
@@ -68,8 +73,14 @@ export class ProcessWebhookEvent {
     private readonly outputDispatcher: OutputDispatcher,
     private readonly incidentAlerts: IncidentAlertOrchestrator,
     private readonly tenantInfra?: TenantInfraAdapter,
-    private readonly ingestionSecretKey?: string
-  ) {}
+    private readonly ingestionSecretKey?: string,
+    processingTimeoutMs?: number
+  ) {
+    this.processingTimeoutMs =
+      processingTimeoutMs !== undefined
+        ? Math.min(Math.max(processingTimeoutMs, 15_000), 300_000)
+        : DEFAULT_GLOBAL_PROCESSING_TIMEOUT_MS;
+  }
 
   async execute(
     command: ProcessWebhookEventCommand
@@ -83,7 +94,7 @@ export class ProcessWebhookEvent {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
         () => reject(new ProcessingTimeoutError()),
-        GLOBAL_PROCESSING_TIMEOUT_MS
+        this.processingTimeoutMs
       );
     });
 
@@ -539,7 +550,7 @@ export class ProcessWebhookEvent {
 
 // ── Domain errors ─────────────────────────────────────────────────────────────
 
-/** Thrown when {@link GLOBAL_PROCESSING_TIMEOUT_MS} elapses (see {@link ProcessWebhookEvent.execute}). */
+/** Thrown when the webhook processing wall-clock budget elapses (see {@link ProcessWebhookEvent.execute}). */
 export class ProcessingTimeoutError extends Error {
   constructor() {
     super("Processing timeout");

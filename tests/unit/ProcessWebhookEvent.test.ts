@@ -78,7 +78,7 @@ function makeDeps() {
       description: "Maps user_id → id and full_name → name",
       language: "javascript",
       confidence: 0.95,
-      modelUsed: "gemini-2.0-flash",
+      modelUsed: "gemini-2.5-flash",
     }),
   };
 
@@ -118,7 +118,7 @@ function makeDeps() {
   };
 }
 
-function createProcessWebhook(deps: ReturnType<typeof makeDeps>) {
+function createProcessWebhook(deps: ReturnType<typeof makeDeps>, processingTimeoutMs?: number) {
   return new ProcessWebhookEvent(
     deps.eventRepo,
     deps.endpointRepo,
@@ -129,7 +129,9 @@ function createProcessWebhook(deps: ReturnType<typeof makeDeps>) {
     deps.sandboxService,
     deps.outputDispatcher as never,
     deps.incidentAlerts as never,
-    undefined
+    undefined,
+    undefined,
+    processingTimeoutMs
   );
 }
 
@@ -180,7 +182,7 @@ describe("ProcessWebhookEvent", () => {
           })
       );
 
-      const useCase = createProcessWebhook(deps);
+      const useCase = createProcessWebhook(deps, 28_000);
       const execPromise = useCase.execute({
         eventId: "evt-global-timeout",
         tenantId: "tenant-001",
