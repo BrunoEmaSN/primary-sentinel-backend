@@ -14,6 +14,7 @@
     "seed:test-user": "node scripts/seed-test-user.mjs"
   },
   "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "*",
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.43.0",
     "@upstash/redis": "^1.28.0",

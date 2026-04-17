@@ -1,24 +1,33 @@
 // src/infrastructure/adapters/sandbox/JSSandboxAdapter.ts
 
-import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
+import releaseSync from "@jitl/quickjs-wasmfile-release-sync";
+import {
+  newQuickJSWASMModuleFromVariant,
+  newVariant,
+  shouldInterruptAfterDeadline,
+} from "quickjs-emscripten";
 import type { ISandboxService, SandboxResult } from "../../../application/ports/index.js";
 import { createLogger } from "../../utils/logger.js";
+
+/** Pre-bundled by Wrangler (`[[rules]]` CompiledWasm); avoids fetch / instantiateStreaming in Workers. */
+import quickjsWasmModule from "../../../../node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.wasm";
 
 const logger = createLogger("JSSandboxAdapter");
 
 const MAX_EXECUTION_TIME_MS = 5000;
-const MAX_OUTPUT_SIZE_BYTES = 1024 * 512; // 512KB
+const MAX_OUTPUT_SIZE_BYTES = 1024 * 512;
 const QUICKJS_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024;
 
-type QuickJsModule = Awaited<ReturnType<typeof getQuickJS>>;
+type QuickJsModule = Awaited<ReturnType<typeof newQuickJSWASMModuleFromVariant>>;
 
-let quickJsModulePromise: Promise<QuickJsModule> | null = null;
+let quickJsSingleton: Promise<QuickJsModule> | null = null;
 
-function loadQuickJs(): Promise<QuickJsModule> {
-  if (!quickJsModulePromise) {
-    quickJsModulePromise = getQuickJS();
+function getQuickJsModule(): Promise<QuickJsModule> {
+  if (!quickJsSingleton) {
+    const variant = newVariant(releaseSync, { wasmModule: quickjsWasmModule });
+    quickJsSingleton = newQuickJSWASMModuleFromVariant(variant);
   }
-  return quickJsModulePromise;
+  return quickJsSingleton;
 }
 
 export class JSSandboxAdapter implements ISandboxService {
@@ -48,12 +57,8 @@ export class JSSandboxAdapter implements ISandboxService {
     }
   }
 
-  /**
-   * Runs the LLM-generated function body in QuickJS (WASM). Cloudflare Workers disallow
-   * `new Function` / eval in the isolate; QuickJS evaluates the same script safely.
-   */
   private async runInQuickJs(script: string, input: unknown): Promise<unknown> {
-    const QuickJS = await loadQuickJs();
+    const QuickJS = await getQuickJsModule();
     const inputLiteral = JSON.stringify(input);
     const wrapped = `"use strict";
 (function(input) {

@@ -23,7 +23,7 @@ name = "EMAIL"
 # Align with NEXT_PUBLIC_SITE_URL on Vercel. Each Vercel preview URL needs its own entry unless you use a single custom domain.
 [env.production]
 name = "sentinel-saas-prod"
-vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app", GEMINI_MODEL = "gemini-2.5-flash" }
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app", GEMINI_MODEL = "gemini-2.0-flash" }
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
