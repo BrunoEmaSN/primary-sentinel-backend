@@ -16,13 +16,18 @@ import type {
   BigQueryDestination,
 } from "../../domain/events/entities/Endpoint.js";
 import { createLogger } from "../../infrastructure/utils/logger.js";
+import { expandRootUrlToWorkerTestSink } from "../../domain/events/outboundHttpUrl.js";
 
 const logger = createLogger("OutputDispatcher");
 
 export class OutputDispatcher {
   constructor(
     private readonly defaultSupabaseUrl: string,
-    private readonly defaultSupabaseKey: string
+    private readonly defaultSupabaseKey: string,
+    /** Misma base que `WORKER_URL` en wrangler: expande `/` → sink de prueba en ese host. */
+    private readonly workerPublicBaseUrl?: string,
+    /** Ver `SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK` en WorkerEnv. */
+    private readonly loopbackRootUsesWorkerSink?: boolean
   ) {}
 
   async dispatch(
@@ -111,6 +116,15 @@ export class OutputDispatcher {
   }
 
   private async runWebhookRequest(dest: WebhookDestination, payload: unknown): Promise<number> {
+    const fetchUrl = expandRootUrlToWorkerTestSink(dest.url, this.workerPublicBaseUrl, {
+      loopbackRootUsesWorkerSink: this.loopbackRootUsesWorkerSink,
+    });
+    if (fetchUrl !== dest.url.trim()) {
+      logger.info("Webhook URL expanded from root to Worker test sink", {
+        original: dest.url,
+        fetchUrl,
+      });
+    }
     const body = dest.wrapKey
       ? JSON.stringify({ [dest.wrapKey]: payload })
       : JSON.stringify(payload);
@@ -118,7 +132,7 @@ export class OutputDispatcher {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), dest.timeoutMs);
     try {
-      const res = await fetch(dest.url, {
+      const res = await fetch(fetchUrl, {
         method: dest.method,
         headers: { "Content-Type": "application/json", ...(dest.headers ?? {}) },
         body,
@@ -146,7 +160,12 @@ export class OutputDispatcher {
         if (attempt < maxAttempts) {
           const delayMs = 500 * Math.pow(2, attempt - 1);
           await new Promise((r) => setTimeout(r, delayMs));
-          logger.info(`Webhook retry ${attempt}/${maxAttempts}`, { url: dest.url, delayMs });
+          logger.info(`Webhook retry ${attempt}/${maxAttempts}`, {
+            url: expandRootUrlToWorkerTestSink(dest.url, this.workerPublicBaseUrl, {
+              loopbackRootUsesWorkerSink: this.loopbackRootUsesWorkerSink,
+            }),
+            delayMs,
+          });
         }
       }
     }
@@ -154,6 +173,9 @@ export class OutputDispatcher {
   }
 
   private async toHttpApi(dest: HttpApiDestination, payload: unknown): Promise<number> {
+    const fetchUrl = expandRootUrlToWorkerTestSink(dest.url, this.workerPublicBaseUrl, {
+      loopbackRootUsesWorkerSink: this.loopbackRootUsesWorkerSink,
+    });
     const authHeaders: Record<string, string> = {};
 
     switch (dest.authType) {
@@ -174,7 +196,7 @@ export class OutputDispatcher {
     const timer = setTimeout(() => controller.abort(), dest.timeoutMs);
 
     try {
-      const res = await fetch(dest.url, {
+      const res = await fetch(fetchUrl, {
         method: dest.method,
         headers: {
           "Content-Type": "application/json",

@@ -66,7 +66,15 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   );
   const incidentAlerts = new IncidentAlertOrchestrator(notificationService, tenantInfra);
   const sandboxService = new JSSandboxAdapter();
-  const outputDispatcher = new OutputDispatcher(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+  const loopbackSink =
+    env.SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK === "1" ||
+    env.SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK === "true";
+  const outputDispatcher = new OutputDispatcher(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_KEY,
+    env.WORKER_URL,
+    loopbackSink
+  );
 
   _deps = {
     eventRepo,

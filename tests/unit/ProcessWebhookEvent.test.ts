@@ -163,6 +163,62 @@ describe("ProcessWebhookEvent", () => {
       expect(result.dispatchResults![0]!.success).toBe(true);
     });
 
+    it("loads endpoint by endpointId (reinject) and dispatches without using slug lookup", async () => {
+      const deps = makeDeps();
+      deps.endpointRepo.findBySlug = vi.fn().mockResolvedValue(null);
+      const useCase = createProcessWebhook(deps);
+
+      const result = await useCase.execute({
+        eventId: "evt-reinject-by-id",
+        tenantId: "tenant-001",
+        endpointId: "ep-001",
+        rawPayload: { id: "123", name: "Alice" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://sentinel.reinject/local",
+      });
+
+      expect(result.status).toBe("loaded");
+      expect(deps.endpointRepo.findById).toHaveBeenCalledWith("ep-001");
+      expect(deps.endpointRepo.findBySlug).not.toHaveBeenCalled();
+      expect(deps.outputDispatcher.dispatch).toHaveBeenCalledOnce();
+    });
+
+    it("sends to DLQ when endpoint has no outbound destinations", async () => {
+      const deps = makeDeps();
+      const emptyDestEp = Endpoint.create({
+        id: "ep-001",
+        tenantId: "tenant-001",
+        name: "Test Endpoint",
+        slug: "test-endpoint",
+        schema: {
+          type: "object",
+          required: ["id", "name"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+        destinations: [],
+        webhookSecret: "secret",
+      });
+      deps.endpointRepo.findBySlug = vi.fn().mockResolvedValue(emptyDestEp);
+      deps.endpointRepo.findById = vi.fn().mockResolvedValue(emptyDestEp);
+
+      const useCase = createProcessWebhook(deps);
+      const result = await useCase.execute({
+        eventId: "evt-no-dest",
+        tenantId: "tenant-001",
+        endpointSlug: "test-endpoint",
+        rawPayload: { id: "123", name: "Alice" },
+        metadata: { contentType: "application/json", headers: {} },
+        origin: "https://example.com",
+      });
+
+      expect(result.status).toBe("dead");
+      expect(result.message).toMatch(/No destinations configured/i);
+      expect(deps.outputDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
     it("sends to DLQ when global processing timeout is exceeded", async () => {
       vi.useFakeTimers();
       const deps = makeDeps();
@@ -278,7 +334,7 @@ describe("ProcessWebhookEvent", () => {
         name: "No Healing",
         slug: "no-healing",
         schema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-        destinations: [{ type: "webhook", url: "https://example.com", method: "POST", retryOnFailure: false, timeoutMs: 5000 }],
+        destinations: [{ type: "webhook", url: "https://example.com/hook", method: "POST", retryOnFailure: false, timeoutMs: 5000 }],
         healingConfig: { enabled: false, maxAttempts: 3, autoApplyRules: false, notifyOnHealing: false, notifyOnDead: false },
         webhookSecret: "sec",
       });

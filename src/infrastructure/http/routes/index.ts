@@ -22,6 +22,7 @@ import { buildDependencies } from "../../container.js";
 import type { Dependencies } from "../../container.js";
 import { generateId } from "../../utils/crypto.js";
 import { createLogger } from "../../utils/logger.js";
+import { resolveIngestEventId } from "../webhookIngestIdentity.js";
 
 const logger = createLogger("Router");
 
@@ -81,6 +82,11 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
     if (path === "/api/public/negotiation-policy" && method === "GET") {
       return await handlePublicNegotiationPolicy(deps);
+    }
+
+    /** POST JSON de prueba — acepta cualquier cuerpo; rate-limited por IP. */
+    if (path === "/api/public/webhook-test-sink" && method === "POST") {
+      return await handlePublicWebhookTestSink(request, env);
     }
 
     const authResult = await authenticateRequest(request, env);
@@ -191,6 +197,20 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   }
 }
 
+/** Destino HTTP de prueba (200 + JSON). Público; limitado por IP. */
+async function handlePublicWebhookTestSink(request: Request, env: WorkerEnv): Promise<Response> {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const { allowed } = await checkRateLimit(env.RULE_CACHE, `sink:${ip}`, 60, 60);
+  if (!allowed) return errorResponse("Rate limit exceeded", 429);
+  await request.text().catch(() => "");
+  return jsonResponse({
+    ok: true,
+    receivedAt: new Date().toISOString(),
+    hint:
+      "Sink de prueba Primary Sentinel. Configuralo como URL de destino webhook (con esta ruta, no solo el dominio).",
+  });
+}
+
 async function handleWebhook(
   request: Request,
   url: URL,
@@ -221,10 +241,13 @@ async function handleWebhook(
     return errorResponse("Invalid JSON payload", 400);
   }
 
-  const eventId =
-    request.headers.get("X-Event-ID") ??
-    request.headers.get("X-Idempotency-Key") ??
-    generateId();
+  const eventId = resolveIngestEventId({
+    tenantId,
+    endpointSlug,
+    headers: request.headers,
+    rawPayload,
+    generateId,
+  });
 
   const requestHeaders: Record<string, string> = {};
   request.headers.forEach((value, key) => {

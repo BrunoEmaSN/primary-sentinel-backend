@@ -34,7 +34,10 @@ export const DEFAULT_GLOBAL_PROCESSING_TIMEOUT_MS = 180_000;
 export type ProcessWebhookEventCommand = {
   eventId: string;
   tenantId: string;
-  endpointSlug: string;
+  /** Ingesta HTTP pública (`POST /webhook/...`): usar slug. */
+  endpointSlug?: string;
+  /** Reinyección DLQ: preferir id para cargar el mismo endpoint aunque cambie el slug. */
+  endpointId?: string;
   rawPayload: unknown;
   metadata: {
     contentType: string;
@@ -42,6 +45,7 @@ export type ProcessWebhookEventCommand = {
     ipAddress?: string;
     userAgent?: string;
   };
+  /** Origen del request HTTP o URN interno (reinyección DLQ); no se usa como URL de red. */
   origin: string;
 };
 
@@ -140,9 +144,14 @@ export class ProcessWebhookEvent {
       eventId: command.eventId,
       tenantId: command.tenantId,
       endpointSlug: command.endpointSlug,
+      endpointId: command.endpointId,
     });
 
     const processingStarted = Date.now();
+
+    if (!command.endpointSlug && !command.endpointId) {
+      throw new Error("ProcessWebhookEvent: endpointSlug or endpointId is required");
+    }
 
     // ── Step 0: Idempotency guard ───────────────────────────────────────────
     if (await this.eventRepo.existsById(command.eventId)) {
@@ -155,12 +164,22 @@ export class ProcessWebhookEvent {
     }
 
     // ── Step 1: Load endpoint ───────────────────────────────────────────────
-    const endpoint = await this.endpointRepo.findBySlug({
-      tenantId: command.tenantId,
-      slug: command.endpointSlug,
-    });
+    const endpoint = command.endpointId
+      ? await this.endpointRepo.findById(command.endpointId)
+      : await this.endpointRepo.findBySlug({
+          tenantId: command.tenantId,
+          slug: command.endpointSlug!,
+        });
 
-    if (!endpoint) throw new EndpointNotFoundError(command.endpointSlug, command.tenantId);
+    if (!endpoint) {
+      if (command.endpointId) {
+        throw new Error(`Endpoint not found: ${command.endpointId}`);
+      }
+      throw new EndpointNotFoundError(command.endpointSlug!, command.tenantId);
+    }
+    if (endpoint.tenantId !== command.tenantId) {
+      throw new Error("Endpoint tenant mismatch");
+    }
     if (!endpoint.isActive()) throw new EndpointInactiveError(endpoint.id);
 
     // ── Step 2: Persist raw event ───────────────────────────────────────────
@@ -380,6 +399,14 @@ export class ProcessWebhookEvent {
       eventId: event.id,
       destinationCount: endpoint.destinations.length,
     });
+
+    if (endpoint.destinations.length === 0) {
+      return await this.sendToDLQ(
+        event,
+        endpoint,
+        "No destinations configured — add at least one outbound destination (e.g. webhook URL) for this endpoint"
+      );
+    }
 
     const d0 = Date.now();
     const dispatchResults = await this.outputDispatcher.dispatch(

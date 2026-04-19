@@ -21,14 +21,53 @@ describe("OutputDispatcher", () => {
   let dispatcher: OutputDispatcher;
 
   beforeEach(() => {
-    dispatcher = new OutputDispatcher(
-      "https://test.supabase.co",
-      "test-service-key"
-    );
+    dispatcher = new OutputDispatcher("https://test.supabase.co", "test-service-key", undefined, false);
     fetchMock.mockReset();
   });
 
   describe("dispatch — single webhook destination", () => {
+    it("calls fetch when URL is root-only (no preemptive error)", async () => {
+      fetchMock.mockResolvedValue({ ok: false, status: 404, text: async () => "nope" });
+      const dest: Destination = {
+        type: "webhook",
+        url: "https://example.com",
+        method: "POST",
+        retryOnFailure: false,
+        timeoutMs: 5000,
+      };
+
+      const results = await dispatcher.dispatch([dest], { id: "x" });
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(results[0]!.success).toBe(false);
+      expect(results[0]!.error).toMatch(/Webhook 404/i);
+    });
+
+    it("expands root Worker URL to test sink when WORKER_URL matches", async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 200 });
+      const local = new OutputDispatcher(
+        "https://test.supabase.co",
+        "test-service-key",
+        "https://w.workers.dev",
+        false
+      );
+      const dest: Destination = {
+        type: "webhook",
+        url: "https://w.workers.dev",
+        method: "POST",
+        retryOnFailure: false,
+        timeoutMs: 5000,
+      };
+
+      const results = await local.dispatch([dest], { id: "x" });
+
+      expect(results[0]!.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://w.workers.dev/api/public/webhook-test-sink",
+        expect.anything()
+      );
+    });
+
     it("returns success result when webhook responds 200", async () => {
       fetchMock.mockResolvedValue({ ok: true, status: 200 });
 
@@ -214,8 +253,8 @@ describe("OutputDispatcher", () => {
       fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
 
       const destinations: Destination[] = [
-        { type: "webhook", url: "https://bad.example.com", method: "POST", retryOnFailure: false, timeoutMs: 5000 },
-        { type: "webhook", url: "https://good.example.com", method: "POST", retryOnFailure: false, timeoutMs: 5000 },
+        { type: "webhook", url: "https://bad.example.com/hook", method: "POST", retryOnFailure: false, timeoutMs: 5000 },
+        { type: "webhook", url: "https://good.example.com/hook", method: "POST", retryOnFailure: false, timeoutMs: 5000 },
       ];
 
       const results = await dispatcher.dispatch(destinations, {});

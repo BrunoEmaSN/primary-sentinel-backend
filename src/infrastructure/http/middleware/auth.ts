@@ -33,6 +33,11 @@ export type WorkerEnv = {
   ENVIRONMENT: string;
   LOG_LEVEL: string;
   WORKER_URL: string;
+  /**
+   * Dev: "1" / "true" — si el destino webhook es solo `/` en loopback (p. ej. :3000),
+   * reenvía al sink del Worker (`WORKER_URL`) para evitar "Cannot POST /" del frontend.
+   */
+  SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK?: string;
   /** Comma-separated exact origins for CORS (e.g. https://app.vercel.app). Empty/absent = permissive dev behavior. */
   ALLOWED_ORIGINS?: string;
 };

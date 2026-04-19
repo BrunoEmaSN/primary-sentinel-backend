@@ -47,4 +47,28 @@ describe("DestinationSchema", () => {
     });
     expect(d.type).toBe("bigquery");
   });
+
+  it("accepts webhook URL with root path (expansion at dispatch uses WORKER_URL)", () => {
+    const d = DestinationSchema.parse({
+      type: "webhook",
+      url: "https://localhost:3000",
+      method: "POST",
+      retryOnFailure: false,
+      timeoutMs: 5000,
+    });
+    expect(d.type).toBe("webhook");
+    if (d.type === "webhook") expect(d.url).toContain("localhost");
+  });
+
+  it("accepts webhook URL with a non-root path", () => {
+    const d = DestinationSchema.parse({
+      type: "webhook",
+      url: "https://httpbin.org/post",
+      method: "POST",
+      retryOnFailure: false,
+      timeoutMs: 5000,
+    });
+    expect(d.type).toBe("webhook");
+    if (d.type === "webhook") expect(d.url).toContain("/post");
+  });
 });

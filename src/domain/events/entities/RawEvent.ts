@@ -13,6 +13,7 @@ export type EventStatus =
 export type EventSource = {
   tenantId: string;
   endpointId: string;
+  /** Origen HTTP (`Origin` / URL del worker) o URN interno p. ej. reinyección DLQ (`urn:sentinel:source:reinject`). */
   origin: string;
   receivedAt: Date;
 };

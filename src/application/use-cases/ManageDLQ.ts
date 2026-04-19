@@ -1,4 +1,5 @@
 import { ProcessWebhookEvent } from "./ProcessWebhookEvent.js";
+import { EVENT_ORIGIN_REINJECT_DLQ } from "../../domain/events/internalOrigins.js";
 import type { RawEvent } from "../../domain/events/entities/RawEvent.js";
 import type { IEventRepository } from "../../domain/events/repositories/IEventRepository.js";
 import type { IEndpointRepository } from "../../domain/events/repositories/IEndpointRepository.js";
@@ -33,7 +34,12 @@ export class ReinjectDlqEvent {
       throw new Error("Endpoint not found");
     }
 
-    const payload = params.correctedPayload ?? event.rawPayload;
+    // Tras fallo de destinos el evento suele tener `validatedPayload` (dato ya conforme al esquema)
+    // mientras que `rawPayload` sigue siendo el ingreso original — reinyectar solo el raw
+    // haría fallar la validación y nunca se dispararían los destinos.
+    const payload =
+      params.correctedPayload ??
+      (event.validatedPayload != null ? event.validatedPayload : event.rawPayload);
 
     if (params.snapshotName) {
       await this.tenantInfra
@@ -52,13 +58,13 @@ export class ReinjectDlqEvent {
     const result = await this.processWebhook.execute({
       eventId: newEventId,
       tenantId: params.tenantId,
-      endpointSlug: endpoint.slug,
+      endpointId: endpoint.id,
       rawPayload: payload,
       metadata: {
         contentType: "application/json",
         headers: { "X-Sentinel-Reinject": "true" },
       },
-      origin: "https://sentinel.reinject/local",
+      origin: EVENT_ORIGIN_REINJECT_DLQ,
     });
 
     await this.eventRepo.deleteById(params.eventId);

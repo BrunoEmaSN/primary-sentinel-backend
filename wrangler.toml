@@ -4,7 +4,16 @@ main = "workers/main.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug", WORKER_URL = "http://localhost:8787", GEMINI_MODEL = "gemini-2.5-flash" }
+# SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK: en local, URL webhook "solo raíz" en loopback (p. ej. :3000) → sink del Worker (:8787), evita Cannot POST / del Next.
+vars = {
+    ENVIRONMENT = "development",
+    LOG_LEVEL = "debug",
+    WORKER_URL = "http://localhost:8787",
+    GEMINI_MODEL = "gemini-2.5-flash",
+    SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK = "1",
+    SENTINEL_DESTINATION_SECRET_KEY="3njp1gvEWd5Hqt8s7WTN4zpNuAIA3VkbWC5UPI+4/Qo=",
+    SENTINEL_INGESTION_SECRET_KEY="3njp1gvEWd5Hqt8s7WTN4zpNuAIA3VkbWC5UPI+4/Qo="
+}
 
 [[kv_namespaces]]
 binding = "RULE_CACHE"
@@ -23,7 +32,12 @@ name = "EMAIL"
 # Align with NEXT_PUBLIC_SITE_URL on Vercel. Each Vercel preview URL needs its own entry unless you use a single custom domain.
 [env.production]
 name = "sentinel-saas-prod"
-vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", WORKER_URL = "https://sentinel-saas-prod.yourworker.workers.dev", ALLOWED_ORIGINS = "https://your-app.vercel.app", GEMINI_MODEL = "gemini-2.0-flash" }
+vars = {
+    ENVIRONMENT = "production",
+    LOG_LEVEL = "info",
+    GEMINI_MODEL = "gemini-2.0-flash",
+    SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK = "1",
+}
 
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
