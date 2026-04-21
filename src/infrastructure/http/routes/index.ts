@@ -295,7 +295,7 @@ async function handleCreateEndpoint(
   const activeCount = await deps.endpointRepo.countActiveByTenant(auth.tenantId);
   if (settings.billing_plan === "free" && activeCount >= 1) {
     return errorResponse(
-      "Plan Gratis: solo 1 endpoint activo. Pausa un endpoint existente o actualiza el plan (véase facturación).",
+      "Solo podés tener 1 endpoint de prueba activo a la vez. Pausá un endpoint existente antes de crear o reactivar otro.",
       402
     );
   }
