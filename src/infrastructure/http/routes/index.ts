@@ -1,6 +1,7 @@
 // src/infrastructure/http/routes/index.ts
 
-import type { WorkerEnv, AuthContext } from "../middleware/auth.js";
+import type { AuthContext } from "../middleware/auth.js";
+import type { WorkerEnv } from "../workerEnv.js";
 import {
   authenticateRequest,
   validateWebhookSignature,
@@ -28,14 +29,40 @@ import { apiT, translateDomainError } from "../i18n/apiMessages.js";
 
 const logger = createLogger("Router");
 
-/** Quitar prefijo duplicado cuando el proxy apunta por error a `…/worker-api` (Vercel rewrite + URL mal copiada). */
-function normalizeRouterPathname(pathname: string): string {
+function resolveHttpPathPrefix(env: WorkerEnv): string | undefined {
+  const explicit = env.SENTINEL_HTTP_PATH_PREFIX?.trim();
+  if (explicit) {
+    const normalized = (explicit.startsWith("/") ? explicit : `/${explicit}`).replace(/\/+$/, "") || "";
+    if (!normalized || normalized === "/") return undefined;
+    return normalized;
+  }
+  try {
+    const p = (new URL(env.WORKER_URL.trim()).pathname || "/").replace(/\/+$/, "") || "";
+    if (!p || p === "/") return undefined;
+    return p;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * - Quita `/worker-api` si el proxy duplicó el prefijo.
+ * - Quita el prefijo HTTP del Worker (`/gateway`, etc.) inferido de `WORKER_URL` o `SENTINEL_HTTP_PATH_PREFIX`.
+ */
+function normalizeRouterPathname(pathname: string, env: WorkerEnv): string {
   let p = pathname;
   if (p.length > 1 && p.endsWith("/")) {
     p = p.slice(0, -1);
   }
   if (p === "/worker-api" || p.startsWith("/worker-api/")) {
     p = p.slice("/worker-api".length) || "/";
+    if (p.length > 1 && p.endsWith("/")) {
+      p = p.slice(0, -1);
+    }
+  }
+  const prefix = resolveHttpPathPrefix(env);
+  if (prefix && (p === prefix || p.startsWith(`${prefix}/`))) {
+    p = p === prefix ? "/" : p.slice(prefix.length) || "/";
     if (p.length > 1 && p.endsWith("/")) {
       p = p.slice(0, -1);
     }
@@ -69,7 +96,7 @@ function buildProcessWebhookUseCase(deps: Dependencies, env: WorkerEnv): Process
 
 export async function handleRequest(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
-  const path = normalizeRouterPathname(url.pathname);
+  const path = normalizeRouterPathname(url.pathname, env);
   const method = request.method;
   const locale = resolveApiLocale(request);
 
@@ -203,7 +230,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return await handleBillingStatus(auth, deps, locale);
     }
 
-    return errorResponse(apiT(locale, "notFound") + " - " + path, 404);
+    return errorResponse(apiT(locale, "notFound"), 404);
   } catch (e) {
     const errInfo =
       e instanceof Error

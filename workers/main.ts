@@ -1,7 +1,7 @@
 // workers/main.ts
 
 import { handleRequest } from "../src/infrastructure/http/routes/index.js";
-import type { WorkerEnv } from "../src/infrastructure/http/middleware/auth.js";
+import type { WorkerEnv } from "../src/infrastructure/http/workerEnv.js";
 import { resetDependencies } from "../src/infrastructure/container.js";
 import { createLogger } from "../src/infrastructure/utils/logger.js";
 import {

@@ -1,6 +1,6 @@
 // src/infrastructure/container.ts
 
-import type { WorkerEnv } from "./http/middleware/auth.js";
+import type { WorkerEnv } from "./http/workerEnv.js";
 import {
   SupabaseEventRepository,
   SupabaseEndpointRepository,

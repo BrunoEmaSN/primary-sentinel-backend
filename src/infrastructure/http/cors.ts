@@ -1,6 +1,6 @@
 // src/infrastructure/http/cors.ts
 
-import type { WorkerEnv } from "./middleware/auth.js";
+import type { WorkerEnv } from "./workerEnv.js";
 
 function parseAllowedOrigins(env: WorkerEnv): string[] | null {
   const raw = env.ALLOWED_ORIGINS?.trim();

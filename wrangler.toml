@@ -26,6 +26,7 @@ name = "EMAIL"
 name = "sentinel-saas-prod"
 vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", GEMINI_MODEL = "gemini-2.0-flash", SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK = "1" }
 
+# Optional vars (non-secret): SENTINEL_HTTP_PATH_PREFIX=/gateway si el Worker recibe /gateway/api/… pero WORKER_URL no incluye ese path.
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
 # SUPABASE_SERVICE_KEY

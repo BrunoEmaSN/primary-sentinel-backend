@@ -26,8 +26,9 @@ QSTASH_TOKEN=qstash_...
 QSTASH_CURRENT_SIGNING_KEY=sig_...
 QSTASH_NEXT_SIGNING_KEY=sig_...
 
-# URL pública de tu Worker (para QStash callbacks)
-# En dev: http://localhost:8787 | En prod: tu URL de workers.dev
+# URL pública de tu Worker (para QStash callbacks, webhooks, prefijo de rutas).
+# En dev: http://localhost:8787 | En prod: https://api.tudominio.com/gateway si el API vive bajo /gateway
+# Si WORKER_URL es solo el origin sin el prefijo, opcional: SENTINEL_HTTP_PATH_PREFIX=/gateway
 WORKER_URL=http://localhost:8787
 
 # Email: binding [[send_email]] en wrangler.toml (sin API key en vars).

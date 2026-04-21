@@ -68,6 +68,31 @@ describe("OutputDispatcher", () => {
       );
     });
 
+    it("expands root URL to sink under WORKER_URL path prefix (e.g. /gateway)", async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 200 });
+      const local = new OutputDispatcher(
+        "https://test.supabase.co",
+        "test-service-key",
+        "https://api.example.com/gateway",
+        false
+      );
+      const dest: Destination = {
+        type: "webhook",
+        url: "https://api.example.com",
+        method: "POST",
+        retryOnFailure: false,
+        timeoutMs: 5000,
+      };
+
+      const results = await local.dispatch([dest], { id: "x" });
+
+      expect(results[0]!.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.com/gateway/api/public/webhook-test-sink",
+        expect.anything()
+      );
+    });
+
     it("returns success result when webhook responds 200", async () => {
       fetchMock.mockResolvedValue({ ok: true, status: 200 });
 

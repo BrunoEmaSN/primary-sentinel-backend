@@ -53,6 +53,19 @@ export function sameOriginAsWorkerForSink(destinationUrl: string, workerBaseUrl:
 /** Ruta pública del Worker que acepta POST JSON (mismo despliegue que WORKER_URL). */
 export const WEBHOOK_TEST_SINK_PATH = "/api/public/webhook-test-sink" as const;
 
+/** Une la base pública del Worker (puede incluir prefijo, p. ej. `https://host/gateway`) con una ruta absoluta (`/api/...`). */
+export function joinPublicWorkerRoute(workerBaseUrl: string, absoluteRoute: string): string {
+  const w = new URL(workerBaseUrl.trim());
+  const route = absoluteRoute.startsWith("/") ? absoluteRoute : `/${absoluteRoute}`;
+  const basePath = (w.pathname || "/").replace(/\/+$/, "") || "";
+  if (!basePath || basePath === "/") {
+    w.pathname = route;
+  } else {
+    w.pathname = `${basePath}${route}`;
+  }
+  return w.href;
+}
+
 export type ExpandRootUrlOptions = {
   /**
    * Solo desarrollo (.dev.vars): si el destino es solo `/` en cualquier puerto loopback
@@ -79,15 +92,13 @@ export function expandRootUrlToWorkerTestSink(
     const w = new URL(workerBaseUrl.trim());
 
     if (options?.loopbackRootUsesWorkerSink && isLoopbackHost(d.hostname)) {
-      const out = new URL(w);
-      out.pathname = WEBHOOK_TEST_SINK_PATH;
+      const out = new URL(joinPublicWorkerRoute(workerBaseUrl, WEBHOOK_TEST_SINK_PATH));
       out.search = d.search;
       return out.href;
     }
 
     if (sameOriginAsWorkerForSink(trimmed, workerBaseUrl)) {
-      const out = new URL(w);
-      out.pathname = WEBHOOK_TEST_SINK_PATH;
+      const out = new URL(joinPublicWorkerRoute(workerBaseUrl, WEBHOOK_TEST_SINK_PATH));
       out.search = d.search;
       return out.href;
     }

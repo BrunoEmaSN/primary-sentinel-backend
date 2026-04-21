@@ -24,6 +24,14 @@ describe("expandRootUrlToWorkerTestSink", () => {
     expect(out).toBe(`https://my-worker.workers.dev${WEBHOOK_TEST_SINK_PATH}`);
   });
 
+  it("rewrites root URL to sink preserving WORKER_URL path prefix (e.g. /gateway)", () => {
+    const out = expandRootUrlToWorkerTestSink(
+      "https://api-primary-sentinel.com/",
+      "https://api-primary-sentinel.com/gateway"
+    );
+    expect(out).toBe(`https://api-primary-sentinel.com/gateway${WEBHOOK_TEST_SINK_PATH}`);
+  });
+
   it("does not rewrite when origins differ (non-loopback or different port without dev flag)", () => {
     expect(expandRootUrlToWorkerTestSink("https://localhost:3000", "http://127.0.0.1:8787")).toBe(
       "https://localhost:3000"
