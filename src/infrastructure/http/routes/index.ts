@@ -203,7 +203,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return await handleBillingStatus(auth, deps, locale);
     }
 
-    return errorResponse(apiT(locale, "notFound"), 404);
+    return errorResponse(apiT(locale, "notFound") + " - " + path, 404);
   } catch (e) {
     const errInfo =
       e instanceof Error
