@@ -25,7 +25,7 @@ export function buildCorsHeaders(request: Request, env: WorkerEnv): Record<strin
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Authorization, Content-Type, X-Sentinel-Signature, X-Event-ID, X-Requested-With",
+      "Authorization, Content-Type, Accept-Language, X-Sentinel-Signature, X-Sentinel-Locale, X-Event-ID, X-Requested-With",
     "Access-Control-Max-Age": "86400",
   };
 

@@ -22,6 +22,8 @@ import {
   encryptTenantPayload,
   TENANT_CRYPTO_INFO_DLQ_R2,
 } from "../../infrastructure/utils/tenantIngestionCrypto.js";
+import type { ApiLocale } from "../../infrastructure/http/i18n/apiLocale.js";
+import { apiT } from "../../infrastructure/http/i18n/apiMessages.js";
 
 const logger = createLogger("ProcessWebhookEvent");
 
@@ -47,6 +49,8 @@ export type ProcessWebhookEventCommand = {
   };
   /** Origen del request HTTP o URN interno (reinyección DLQ); no se usa como URL de red. */
   origin: string;
+  /** Idioma de mensajes devueltos al cliente (cabecera del front). Por defecto `es`. */
+  locale?: ApiLocale;
 };
 
 export type ProcessWebhookEventResult = {
@@ -89,6 +93,8 @@ export class ProcessWebhookEvent {
   async execute(
     command: ProcessWebhookEventCommand
   ): Promise<ProcessWebhookEventResult> {
+    const locale: ApiLocale = command.locale ?? "es";
+
     const capture: {
       event?: RawEvent;
       endpoint?: import("../../domain/events/entities/Endpoint.js").Endpoint;
@@ -104,7 +110,7 @@ export class ProcessWebhookEvent {
 
     try {
       return await Promise.race([
-        this.runProcessing(command, capture).finally(() => {
+        this.runProcessing(command, locale, capture).finally(() => {
           if (timeoutId !== undefined) clearTimeout(timeoutId);
         }),
         timeoutPromise,
@@ -120,7 +126,7 @@ export class ProcessWebhookEvent {
           return await this.sendToDLQ(
             capture.event,
             capture.endpoint,
-            "Global processing timeout exceeded"
+            apiT(locale, "globalProcessingTimeout")
           );
         }
         throw err;
@@ -135,6 +141,7 @@ export class ProcessWebhookEvent {
    */
   private async runProcessing(
     command: ProcessWebhookEventCommand,
+    locale: ApiLocale,
     capture: {
       event?: RawEvent;
       endpoint?: import("../../domain/events/entities/Endpoint.js").Endpoint;
@@ -159,7 +166,7 @@ export class ProcessWebhookEvent {
       return {
         eventId: command.eventId,
         status: "loaded",
-        message: "Duplicate event — already processed",
+        message: apiT(locale, "duplicateEvent"),
       };
     }
 
@@ -216,7 +223,8 @@ export class ProcessWebhookEvent {
         endpoint,
         validationResult.data,
         "loaded",
-        processingStarted
+        processingStarted,
+        locale
       );
     }
 
@@ -231,11 +239,11 @@ export class ProcessWebhookEvent {
     });
 
     if (!endpoint.healingConfig.enabled) {
-      return await this.sendToDLQ(event, endpoint, "Healing disabled for this endpoint");
+      return await this.sendToDLQ(event, endpoint, apiT(locale, "healingDisabled"));
     }
 
     if (!event.canAttemptHealing(endpoint.healingConfig.maxAttempts)) {
-      return await this.sendToDLQ(event, endpoint, "Max healing attempts exceeded");
+      return await this.sendToDLQ(event, endpoint, apiT(locale, "maxHealingAttempts"));
     }
 
     event.markAsHealing();
@@ -283,7 +291,8 @@ export class ProcessWebhookEvent {
               endpoint,
               healedValidation.data,
               "healed",
-              processingStarted
+              processingStarted,
+              locale
             );
           }
         }
@@ -308,7 +317,7 @@ export class ProcessWebhookEvent {
       return await this.sendToDLQ(
         event,
         endpoint,
-        `LLM generation failed: ${String(llmErr)}`
+        apiT(locale, "llmGenerationFailed", { detail: String(llmErr) })
       );
     }
 
@@ -323,7 +332,7 @@ export class ProcessWebhookEvent {
       return await this.sendToDLQ(
         event,
         endpoint,
-        `Sandbox execution failed: ${sandboxResult.error}`
+        apiT(locale, "sandboxExecutionFailed", { detail: sandboxResult.error ?? "" })
       );
     }
 
@@ -333,7 +342,7 @@ export class ProcessWebhookEvent {
       return await this.sendToDLQ(
         event,
         endpoint,
-        "Transformed data still fails schema validation"
+        apiT(locale, "transformedStillInvalid")
       );
     }
 
@@ -378,7 +387,8 @@ export class ProcessWebhookEvent {
       endpoint,
       healedValidation.data,
       "healed",
-      processingStarted
+      processingStarted,
+      locale
     );
   }
 
@@ -393,7 +403,8 @@ export class ProcessWebhookEvent {
     endpoint: import("../../domain/events/entities/Endpoint.js").Endpoint,
     payload: unknown,
     finalStatus: "loaded" | "healed",
-    processingStarted: number
+    processingStarted: number,
+    locale: ApiLocale
   ): Promise<ProcessWebhookEventResult> {
     logger.info("Dispatching to destinations", {
       eventId: event.id,
@@ -404,7 +415,7 @@ export class ProcessWebhookEvent {
       return await this.sendToDLQ(
         event,
         endpoint,
-        "No destinations configured — add at least one outbound destination (e.g. webhook URL) for this endpoint"
+        apiT(locale, "noDestinationsConfigured")
       );
     }
 
@@ -433,7 +444,11 @@ export class ProcessWebhookEvent {
     if (allFailed) {
       // All destinations failed — send to DLQ
       const errors = dispatchResults.map((r) => r.error ?? "unknown").join("; ");
-      return await this.sendToDLQ(event, endpoint, `All destinations failed: ${errors}`);
+      return await this.sendToDLQ(
+        event,
+        endpoint,
+        apiT(locale, "allDestinationsFailed", { detail: errors })
+      );
     }
 
     // At least one destination succeeded — mark as loaded
@@ -443,10 +458,18 @@ export class ProcessWebhookEvent {
     await this.endpointRepo.update(endpoint);
 
     const failedCount = dispatchResults.filter((r) => !r.success).length;
+    const finalStatusLabel = apiT(locale, finalStatus === "healed" ? "statusHealed" : "statusLoaded");
     const message =
       failedCount > 0
-        ? `Event ${finalStatus} — ${dispatchResults.length - failedCount}/${dispatchResults.length} destinations succeeded`
-        : `Event ${finalStatus} and dispatched to all ${dispatchResults.length} destination(s)`;
+        ? apiT(locale, "dispatchPartialSuccess", {
+            finalStatus: finalStatusLabel,
+            ok: dispatchResults.length - failedCount,
+            total: dispatchResults.length,
+          })
+        : apiT(locale, "dispatchAllSuccess", {
+            finalStatus: finalStatusLabel,
+            total: dispatchResults.length,
+          });
 
     logger.info(message, { eventId: event.id });
 
@@ -494,7 +517,12 @@ export class ProcessWebhookEvent {
       .catch((e) => logger.error("Failed to store DLQ payload", { error: e }));
 
     const rl = reason.toLowerCase();
-    if (rl.includes("schema") || rl.includes("validation")) {
+    if (
+      rl.includes("schema") ||
+      rl.includes("validation") ||
+      rl.includes("esquema") ||
+      rl.includes("validación")
+    ) {
       await this.tenantInfra
         ?.upsertEventTag({
           tenantId: event.tenantId,
@@ -504,7 +532,7 @@ export class ProcessWebhookEvent {
         })
         .catch(() => undefined);
     }
-    if (rl.includes("destination") || rl.includes("webhook")) {
+    if (rl.includes("destination") || rl.includes("webhook") || rl.includes("destino")) {
       await this.tenantInfra
         ?.upsertEventTag({
           tenantId: event.tenantId,

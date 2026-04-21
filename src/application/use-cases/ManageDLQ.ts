@@ -5,6 +5,7 @@ import type { IEventRepository } from "../../domain/events/repositories/IEventRe
 import type { IEndpointRepository } from "../../domain/events/repositories/IEndpointRepository.js";
 import { generateId } from "../../infrastructure/utils/crypto.js";
 import type { TenantInfraAdapter } from "../../infrastructure/adapters/database/TenantInfraAdapter.js";
+import type { ApiLocale } from "../../infrastructure/http/i18n/apiLocale.js";
 
 export class ReinjectDlqEvent {
   constructor(
@@ -20,6 +21,7 @@ export class ReinjectDlqEvent {
     correctedPayload?: unknown;
     actorEmail: string;
     snapshotName?: string;
+    locale?: ApiLocale;
   }): Promise<{ status: string; message: string; newEventId?: string }> {
     const event = await this.eventRepo.findById(params.eventId);
     if (!event || event.tenantId !== params.tenantId) {
@@ -65,6 +67,7 @@ export class ReinjectDlqEvent {
         headers: { "X-Sentinel-Reinject": "true" },
       },
       origin: EVENT_ORIGIN_REINJECT_DLQ,
+      locale: params.locale,
     });
 
     await this.eventRepo.deleteById(params.eventId);

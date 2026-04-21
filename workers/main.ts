@@ -9,6 +9,8 @@ import {
   withCors,
   jsonErrorWithCors,
 } from "../src/infrastructure/http/cors.js";
+import { resolveApiLocale } from "../src/infrastructure/http/i18n/apiLocale.js";
+import { apiT } from "../src/infrastructure/http/i18n/apiMessages.js";
 
 const logger = createLogger("Worker");
 
@@ -50,7 +52,12 @@ export default {
         error: error instanceof Error ? error.message : String(error),
         path: url.pathname,
       });
-      return jsonErrorWithCors(request, { error: "Internal server error" }, 500, env);
+      return jsonErrorWithCors(
+        request,
+        { error: apiT(resolveApiLocale(request), "internalServerError") },
+        500,
+        env
+      );
     }
   },
 

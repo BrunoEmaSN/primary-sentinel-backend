@@ -150,6 +150,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "123", name: "Alice" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("loaded");
@@ -175,6 +176,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "123", name: "Alice" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://sentinel.reinject/local",
+        locale: "en",
       });
 
       expect(result.status).toBe("loaded");
@@ -212,6 +214,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "123", name: "Alice" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("dead");
@@ -246,6 +249,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "123", name: "Alice" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       await vi.advanceTimersByTimeAsync(28_000);
@@ -272,6 +276,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: {},
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("loaded");
@@ -292,6 +297,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { user_id: 123, full_name: "Alice" }, // wrong types
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("healed");
@@ -321,6 +327,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "valid", name: "Alice" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("dead");
@@ -351,6 +358,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { wrong_field: "oops" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("dead");
@@ -390,6 +398,7 @@ describe("ProcessWebhookEvent", () => {
         rawPayload: { id: "valid" },
         metadata: { contentType: "application/json", headers: {} },
         origin: "https://example.com",
+        locale: "en",
       });
 
       expect(result.status).toBe("loaded");

@@ -2,6 +2,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { createLogger } from "../../utils/logger.js";
+import type { ApiLocale } from "../i18n/apiLocale.js";
+import { apiT } from "../i18n/apiMessages.js";
 
 const logger = createLogger("AuthMiddleware");
 
@@ -44,11 +46,12 @@ export type WorkerEnv = {
 
 export async function authenticateRequest(
   request: Request,
-  env: WorkerEnv
+  env: WorkerEnv,
+  locale: ApiLocale
 ): Promise<AuthContext | Response> {
   const authorization = request.headers.get("Authorization");
   if (!authorization?.startsWith("Bearer ")) {
-    return unauthorizedResponse("Missing or invalid Authorization header");
+    return unauthorizedResponse(apiT(locale, "missingAuthHeader"));
   }
 
   const token = authorization.slice(7);
@@ -58,7 +61,7 @@ export async function authenticateRequest(
 
     if (error || !user) {
       logger.warn("Invalid token", { error: error?.message });
-      return unauthorizedResponse("Invalid or expired token");
+      return unauthorizedResponse(apiT(locale, "invalidToken"));
     }
 
     return {
@@ -68,7 +71,7 @@ export async function authenticateRequest(
     };
   } catch (e) {
     logger.error("Auth check failed", { error: e });
-    return unauthorizedResponse("Authentication service error");
+    return unauthorizedResponse(apiT(locale, "authServiceError"));
   }
 }
 

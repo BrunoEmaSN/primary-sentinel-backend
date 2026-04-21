@@ -23,6 +23,8 @@ import type { Dependencies } from "../../container.js";
 import { generateId } from "../../utils/crypto.js";
 import { createLogger } from "../../utils/logger.js";
 import { resolveIngestEventId } from "../webhookIngestIdentity.js";
+import { resolveApiLocale, type ApiLocale } from "../i18n/apiLocale.js";
+import { apiT, translateDomainError } from "../i18n/apiMessages.js";
 
 const logger = createLogger("Router");
 
@@ -54,12 +56,13 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+  const locale = resolveApiLocale(request);
 
   const deps = buildDependencies(env);
 
   try {
     if (method === "POST" && path.match(/^\/webhook\/[\w-]+\/[\w-]+$/)) {
-      return await handleWebhook(request, url, env, deps);
+      return await handleWebhook(request, url, env, deps, locale);
     }
 
     if (path === "/health" && method === "GET") {
@@ -70,8 +73,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return jsonResponse({
         availabilityTargetPercent: 99.95,
         firstUsefulAlertGoalMinutes: 2,
-        note:
-          "Objetivo de producto (beta). Las cifras publicadas en la landing deben rotularse como objetivo hasta contar con medición real (Fase 8).",
+        note: apiT(locale, "sloNote"),
         measured: false,
       });
     }
@@ -86,24 +88,24 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
     /** POST JSON de prueba — acepta cualquier cuerpo; rate-limited por IP. */
     if (path === "/api/public/webhook-test-sink" && method === "POST") {
-      return await handlePublicWebhookTestSink(request, env);
+      return await handlePublicWebhookTestSink(request, env, locale);
     }
 
-    const authResult = await authenticateRequest(request, env);
+    const authResult = await authenticateRequest(request, env, locale);
     if (authResult instanceof Response) return authResult;
     const auth = authResult as AuthContext;
 
     if (path === "/api/endpoints" && method === "POST") {
-      return await handleCreateEndpoint(request, auth, deps, env);
+      return await handleCreateEndpoint(request, auth, deps, env, locale);
     }
     if (path === "/api/endpoints" && method === "GET") {
       return await handleListEndpoints(auth, deps);
     }
     if (path.match(/^\/api\/endpoints\/[\w-]+$/) && method === "GET") {
-      return await handleGetEndpoint(path.split("/").pop()!, auth, deps);
+      return await handleGetEndpoint(path.split("/").pop()!, auth, deps, locale);
     }
     if (path.match(/^\/api\/endpoints\/[\w-]+$/) && method === "PATCH") {
-      return await handleUpdateEndpoint(path.split("/").pop()!, request, auth, deps, env);
+      return await handleUpdateEndpoint(path.split("/").pop()!, request, auth, deps, env, locale);
     }
     if (path.match(/^\/api\/endpoints\/[\w-]+$/) && method === "DELETE") {
       return await handleDeleteEndpoint(path.split("/").pop()!, auth, deps);
@@ -119,11 +121,11 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     if (path.match(/^\/api\/dlq\/[\w-]+\/reinject$/) && method === "POST") {
       const eventId = path.split("/")[3]!;
-      return await handleReinjectDlq(eventId, request, auth, deps, env);
+      return await handleReinjectDlq(eventId, request, auth, deps, env, locale);
     }
     if (path.match(/^\/api\/dlq\/[\w-]+$/) && method === "DELETE") {
       const eventId = path.split("/").pop()!;
-      return await handleDiscardDlq(eventId, auth, deps);
+      return await handleDiscardDlq(eventId, auth, deps, locale);
     }
     if (path.match(/^\/api\/dlq\/[\w-]+\/snapshots$/) && method === "GET") {
       const eventId = path.split("/")[3]!;
@@ -131,7 +133,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     if (path.match(/^\/api\/dlq\/[\w-]+\/diff$/) && method === "GET") {
       const eventId = path.split("/")[3]!;
-      return await handleDlqDiff(eventId, url, auth, deps);
+      return await handleDlqDiff(eventId, url, auth, deps, locale);
     }
 
     if (path === "/api/settings" && method === "GET") {
@@ -151,7 +153,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return await handleStageMetrics(url, auth, deps);
     }
     if (path === "/api/suggestions/heuristics" && method === "GET") {
-      return await handleHeuristicSuggestions(auth, deps);
+      return await handleHeuristicSuggestions(auth, deps, locale);
     }
 
     if (path.match(/^\/api\/events\/[\w-]+\/notes$/) && method === "GET") {
@@ -160,7 +162,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     if (path.match(/^\/api\/events\/[\w-]+\/notes$/) && method === "POST") {
       const eventId = path.split("/")[3]!;
-      return await handleAddEventNote(eventId, request, auth, deps);
+      return await handleAddEventNote(eventId, request, auth, deps, locale);
     }
     if (path.match(/^\/api\/events\/[\w-]+\/tags$/) && method === "GET") {
       const eventId = path.split("/")[3]!;
@@ -168,46 +170,49 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     if (path.match(/^\/api\/events\/[\w-]+\/tags$/) && method === "POST") {
       const eventId = path.split("/")[3]!;
-      return await handleAddEventTag(eventId, request, auth, deps);
+      return await handleAddEventTag(eventId, request, auth, deps, locale);
     }
 
     if (path === "/api/maintenance-windows" && method === "GET") {
       return await handleListMaintenanceWindows(auth, deps);
     }
     if (path === "/api/maintenance-windows" && method === "POST") {
-      return await handleCreateMaintenanceWindow(request, auth, deps);
+      return await handleCreateMaintenanceWindow(request, auth, deps, locale);
     }
     if (path.match(/^\/api\/maintenance-windows\/[\w-]+\/approve$/) && method === "POST") {
       const id = path.split("/")[3]!;
-      return await handleApproveMaintenanceWindow(id, auth, deps);
+      return await handleApproveMaintenanceWindow(id, auth, deps, locale);
     }
 
     if (path === "/api/billing/status" && method === "GET") {
-      return await handleBillingStatus(auth, deps);
+      return await handleBillingStatus(auth, deps, locale);
     }
 
-    return errorResponse("Not found", 404);
+    return errorResponse(apiT(locale, "notFound"), 404);
   } catch (e) {
     const errInfo =
       e instanceof Error
         ? { name: e.name, message: e.message, stack: e.stack }
         : { value: String(e) };
     logger.error("Unhandled error", { error: errInfo, path, method });
-    return errorResponse(e instanceof Error ? e.message : "Internal server error", 500);
+    return errorResponse(translateDomainError(locale, e), 500);
   }
 }
 
 /** Destino HTTP de prueba (200 + JSON). Público; limitado por IP. */
-async function handlePublicWebhookTestSink(request: Request, env: WorkerEnv): Promise<Response> {
+async function handlePublicWebhookTestSink(
+  request: Request,
+  env: WorkerEnv,
+  locale: ApiLocale
+): Promise<Response> {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const { allowed } = await checkRateLimit(env.RULE_CACHE, `sink:${ip}`, 60, 60);
-  if (!allowed) return errorResponse("Rate limit exceeded", 429);
+  if (!allowed) return errorResponse(apiT(locale, "rateLimitExceeded"), 429);
   await request.text().catch(() => "");
   return jsonResponse({
     ok: true,
     receivedAt: new Date().toISOString(),
-    hint:
-      "Sink de prueba Primary Sentinel. Configuralo como URL de destino webhook (con esta ruta, no solo el dominio).",
+    hint: apiT(locale, "publicSinkHint"),
   });
 }
 
@@ -215,13 +220,14 @@ async function handleWebhook(
   request: Request,
   url: URL,
   env: WorkerEnv,
-  deps: Dependencies
+  deps: Dependencies,
+  locale: ApiLocale
 ): Promise<Response> {
   const [, , tenantId, endpointSlug] = url.pathname.split("/");
-  if (!tenantId || !endpointSlug) return errorResponse("Invalid webhook URL", 400);
+  if (!tenantId || !endpointSlug) return errorResponse(apiT(locale, "invalidWebhookUrl"), 400);
 
   const { allowed } = await checkRateLimit(env.RULE_CACHE, `webhook:${tenantId}`, 1000, 60);
-  if (!allowed) return errorResponse("Rate limit exceeded", 429);
+  if (!allowed) return errorResponse(apiT(locale, "rateLimitExceeded"), 429);
 
   const body = await request.text();
 
@@ -230,7 +236,7 @@ async function handleWebhook(
     const endpoint = await deps.endpointRepo.findBySlug({ tenantId, slug: endpointSlug });
     if (endpoint) {
       const valid = await validateWebhookSignature(request, body, endpoint.webhookSecret, signature);
-      if (!valid) return unauthorizedResponse("Invalid webhook signature");
+      if (!valid) return unauthorizedResponse(apiT(locale, "invalidWebhookSignature"));
     }
   }
 
@@ -238,7 +244,7 @@ async function handleWebhook(
   try {
     rawPayload = JSON.parse(body);
   } catch {
-    return errorResponse("Invalid JSON payload", 400);
+    return errorResponse(apiT(locale, "invalidJsonPayload"), 400);
   }
 
   const eventId = resolveIngestEventId({
@@ -270,6 +276,7 @@ async function handleWebhook(
       ...(request.headers.get("User-Agent") ? { userAgent: request.headers.get("User-Agent")! } : {}),
     },
     origin: request.headers.get("Origin") ?? url.origin,
+    locale,
   });
 
   return jsonResponse(result, result.status === "dead" ? 422 : 200);
@@ -279,25 +286,23 @@ async function handleCreateEndpoint(
   request: Request,
   auth: AuthContext,
   deps: Dependencies,
-  env: WorkerEnv
+  env: WorkerEnv,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json()) as Record<string, unknown>;
 
   if (!body["name"] || !body["schema"]) {
-    return errorResponse("Missing required fields: name, schema", 400);
+    return errorResponse(apiT(locale, "missingNameSchema"), 400);
   }
 
   if (!body["destination"] && !body["destinations"]) {
-    return errorResponse("Missing required field: destination or destinations", 400);
+    return errorResponse(apiT(locale, "missingDestination"), 400);
   }
 
   const settings = await deps.tenantInfra.getSettings(auth.tenantId);
   const activeCount = await deps.endpointRepo.countActiveByTenant(auth.tenantId);
   if (settings.billing_plan === "free" && activeCount >= 1) {
-    return errorResponse(
-      "Solo podés tener 1 endpoint de prueba activo a la vez. Pausá un endpoint existente antes de crear o reactivar otro.",
-      402
-    );
+    return errorResponse(apiT(locale, "freePlanEndpointLimit"), 402);
   }
 
   const baseUrl =
@@ -337,7 +342,7 @@ async function handleCreateEndpoint(
     });
     return jsonResponse(result, 201);
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Failed to create endpoint", 400);
+    return errorResponse(translateDomainError(locale, e, "failedCreateEndpoint"), 400);
   }
 }
 
@@ -346,7 +351,8 @@ async function handleUpdateEndpoint(
   request: Request,
   auth: AuthContext,
   deps: Dependencies,
-  env: WorkerEnv
+  env: WorkerEnv,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json()) as Record<string, unknown>;
   const useCase = new UpdateEndpoint(deps.endpointRepo, env.SENTINEL_DESTINATION_SECRET_KEY);
@@ -379,7 +385,7 @@ async function handleUpdateEndpoint(
     });
     return jsonResponse(result);
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Failed to update endpoint", 400);
+    return errorResponse(translateDomainError(locale, e, "failedUpdateEndpoint"), 400);
   }
 }
 
@@ -388,12 +394,17 @@ async function handleListEndpoints(auth: AuthContext, deps: Dependencies): Promi
   return jsonResponse({ data: endpoints, count: endpoints.length });
 }
 
-async function handleGetEndpoint(id: string, auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleGetEndpoint(
+  id: string,
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   const endpoint = await new GetEndpoint(deps.endpointRepo).execute({
     endpointId: id,
     tenantId: auth.tenantId,
   });
-  if (!endpoint) return errorResponse("Endpoint not found", 404);
+  if (!endpoint) return errorResponse(apiT(locale, "endpointNotFound"), 404);
   return jsonResponse(endpoint);
 }
 
@@ -467,7 +478,8 @@ async function handleReinjectDlq(
   request: Request,
   auth: AuthContext,
   deps: Dependencies,
-  env: WorkerEnv
+  env: WorkerEnv,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const correctedPayload = body["correctedPayload"] as Record<string, unknown> | undefined;
@@ -486,20 +498,26 @@ async function handleReinjectDlq(
       correctedPayload,
       actorEmail: auth.email,
       snapshotName,
+      locale,
     });
     return jsonResponse(result);
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Reinject failed", 400);
+    return errorResponse(translateDomainError(locale, e, "reinjectFailed"), 400);
   }
 }
 
-async function handleDiscardDlq(eventId: string, auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleDiscardDlq(
+  eventId: string,
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   const uc = new DiscardDlqEvent(deps.eventRepo);
   try {
     await uc.execute({ tenantId: auth.tenantId, eventId });
     return jsonResponse({ discarded: true });
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Discard failed", 400);
+    return errorResponse(translateDomainError(locale, e, "discardFailed"), 400);
   }
 }
 
@@ -508,18 +526,24 @@ async function handleListDlqSnapshots(eventId: string, auth: AuthContext, deps: 
   return jsonResponse({ data: rows });
 }
 
-async function handleDlqDiff(eventId: string, url: URL, auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleDlqDiff(
+  eventId: string,
+  url: URL,
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   const snapshotId = url.searchParams.get("snapshotId");
-  if (!snapshotId) return errorResponse("snapshotId query required", 400);
+  if (!snapshotId) return errorResponse(apiT(locale, "snapshotIdRequired"), 400);
 
   const snap = await deps.tenantInfra.getSnapshotById(auth.tenantId, snapshotId);
   if (!snap || (snap as { event_id?: string }).event_id !== eventId) {
-    return errorResponse("Snapshot not found", 404);
+    return errorResponse(apiT(locale, "snapshotNotFound"), 404);
   }
 
   const ev = await deps.eventRepo.findById(eventId);
   if (!ev || ev.tenantId !== auth.tenantId || ev.status !== "dead") {
-    return errorResponse("Event not in DLQ", 404);
+    return errorResponse(apiT(locale, "eventNotInDlq"), 404);
   }
 
   const left = (snap as { payload?: unknown }).payload;
@@ -582,7 +606,11 @@ async function handleStageMetrics(url: URL, auth: AuthContext, deps: Dependencie
   return jsonResponse({ data: rows, hours });
 }
 
-async function handleHeuristicSuggestions(auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleHeuristicSuggestions(
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   const since = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
   const rows = (await deps.tenantInfra.listStageMetrics(auth.tenantId, since)) as {
     stage?: string;
@@ -599,14 +627,14 @@ async function handleHeuristicSuggestions(auth: AuthContext, deps: Dependencies)
   if (avg > 2500) {
     suggestions.push({
       id: "timeout-batch",
-      text: "Las entregas a destinos tardan más de 2,5s de media: considera subir timeout en Transform/webhook durante ventanas batch nocturnas.",
+      text: apiT(locale, "heuristicSlowDispatch"),
       severity: "info",
     });
   }
   if (rows.length < 3) {
     suggestions.push({
       id: "instrumentation",
-      text: "Pocas muestras de métricas en las últimas horas: envía tráfico de prueba o revisa el Worker.",
+      text: apiT(locale, "heuristicLowSamples"),
       severity: "low",
     });
   }
@@ -623,11 +651,12 @@ async function handleAddEventNote(
   eventId: string,
   request: Request,
   auth: AuthContext,
-  deps: Dependencies
+  deps: Dependencies,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json()) as Record<string, unknown>;
   const text = body["body"];
-  if (typeof text !== "string" || !text.trim()) return errorResponse("body required", 400);
+  if (typeof text !== "string" || !text.trim()) return errorResponse(apiT(locale, "bodyRequired"), 400);
   await deps.tenantInfra.addEventNote({
     tenantId: auth.tenantId,
     eventId,
@@ -646,11 +675,12 @@ async function handleAddEventTag(
   eventId: string,
   request: Request,
   auth: AuthContext,
-  deps: Dependencies
+  deps: Dependencies,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json()) as Record<string, unknown>;
   const tag = body["tag"];
-  if (typeof tag !== "string" || !tag.trim()) return errorResponse("tag required", 400);
+  if (typeof tag !== "string" || !tag.trim()) return errorResponse(apiT(locale, "tagRequired"), 400);
   await deps.tenantInfra.upsertEventTag({
     tenantId: auth.tenantId,
     eventId,
@@ -668,11 +698,12 @@ async function handleListMaintenanceWindows(auth: AuthContext, deps: Dependencie
 async function handleCreateMaintenanceWindow(
   request: Request,
   auth: AuthContext,
-  deps: Dependencies
+  deps: Dependencies,
+  locale: ApiLocale
 ): Promise<Response> {
   const body = (await request.json()) as Record<string, unknown>;
   if (!body["title"] || !body["starts_at"] || !body["ends_at"]) {
-    return errorResponse("title, starts_at, ends_at required", 400);
+    return errorResponse(apiT(locale, "maintenanceFieldsRequired"), 400);
   }
   try {
     const row = await deps.tenantInfra.createMaintenanceWindow({
@@ -689,26 +720,35 @@ async function handleCreateMaintenanceWindow(
     });
     return jsonResponse(row, 201);
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Failed", 400);
+    return errorResponse(translateDomainError(locale, e, "operationFailed"), 400);
   }
 }
 
-async function handleApproveMaintenanceWindow(id: string, auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleApproveMaintenanceWindow(
+  id: string,
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   try {
     await deps.tenantInfra.approveMaintenanceWindow(auth.tenantId, id);
     return jsonResponse({ approved: true });
   } catch (e) {
-    return errorResponse(e instanceof Error ? e.message : "Failed", 400);
+    return errorResponse(translateDomainError(locale, e, "operationFailed"), 400);
   }
 }
 
-async function handleBillingStatus(auth: AuthContext, deps: Dependencies): Promise<Response> {
+async function handleBillingStatus(
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
   const s = await deps.tenantInfra.getSettings(auth.tenantId);
   return jsonResponse({
     plan: s.billing_plan,
-    stripeCustomerId: s.billing_plan === "pro" ? "(configurar Stripe — Fase 9)" : null,
+    stripeCustomerId: s.billing_plan === "pro" ? apiT(locale, "billingStripePlaceholder") : null,
     portalUrl: null,
-    note: "Facturación self-service en roadmap; límites del plan free aplicados en la API.",
+    note: apiT(locale, "billingNote"),
   });
 }
 
