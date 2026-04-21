@@ -307,8 +307,8 @@ async function handleCreateEndpoint(
 
   const baseUrl =
     env.ENVIRONMENT === "production"
-      ? "https://sentinel-saas-prod.yourworker.workers.dev"
-      : env.WORKER_URL;
+      ? env.WORKER_URL
+      : "http://localhost:8787";
 
   const useCase = new CreateEndpoint(deps.endpointRepo, baseUrl, env.SENTINEL_DESTINATION_SECRET_KEY);
 
