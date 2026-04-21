@@ -28,6 +28,21 @@ import { apiT, translateDomainError } from "../i18n/apiMessages.js";
 
 const logger = createLogger("Router");
 
+/** Quitar prefijo duplicado cuando el proxy apunta por error a `…/worker-api` (Vercel rewrite + URL mal copiada). */
+function normalizeRouterPathname(pathname: string): string {
+  let p = pathname;
+  if (p.length > 1 && p.endsWith("/")) {
+    p = p.slice(0, -1);
+  }
+  if (p === "/worker-api" || p.startsWith("/worker-api/")) {
+    p = p.slice("/worker-api".length) || "/";
+    if (p.length > 1 && p.endsWith("/")) {
+      p = p.slice(0, -1);
+    }
+  }
+  return p;
+}
+
 function parseWebhookProcessingTimeoutMs(env: WorkerEnv): number | undefined {
   const raw = env.WEBHOOK_PROCESSING_TIMEOUT_MS;
   if (raw === undefined || raw === "") return undefined;
@@ -54,7 +69,7 @@ function buildProcessWebhookUseCase(deps: Dependencies, env: WorkerEnv): Process
 
 export async function handleRequest(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname;
+  const path = normalizeRouterPathname(url.pathname);
   const method = request.method;
   const locale = resolveApiLocale(request);
 
@@ -62,7 +77,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
   try {
     if (method === "POST" && path.match(/^\/webhook\/[\w-]+\/[\w-]+$/)) {
-      return await handleWebhook(request, url, env, deps, locale);
+      return await handleWebhook(request, url, env, deps, locale, path);
     }
 
     if (path === "/health" && method === "GET") {
@@ -221,9 +236,10 @@ async function handleWebhook(
   url: URL,
   env: WorkerEnv,
   deps: Dependencies,
-  locale: ApiLocale
+  locale: ApiLocale,
+  pathname: string
 ): Promise<Response> {
-  const [, , tenantId, endpointSlug] = url.pathname.split("/");
+  const [, , tenantId, endpointSlug] = pathname.split("/");
   if (!tenantId || !endpointSlug) return errorResponse(apiT(locale, "invalidWebhookUrl"), 400);
 
   const { allowed } = await checkRateLimit(env.RULE_CACHE, `webhook:${tenantId}`, 1000, 60);
