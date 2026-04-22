@@ -36,13 +36,6 @@ import { putSettingsBodySchema } from "../settingsSchema.js";
 
 const logger = createLogger("Router");
 
-function isProductionMissingCrypto(env: WorkerEnv): boolean {
-  if (env.ENVIRONMENT !== "production") return false;
-  return (
-    !env.SENTINEL_DESTINATION_SECRET_KEY?.trim() || !env.SENTINEL_INGESTION_SECRET_KEY?.trim()
-  );
-}
-
 function resolveHttpPathPrefix(env: WorkerEnv): string | undefined {
   const explicit = env.SENTINEL_HTTP_PATH_PREFIX?.trim();
   if (explicit) {
@@ -114,14 +107,16 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   const method = request.method;
   const locale = resolveApiLocale(request);
 
-  const deps = buildDependencies(env);
-
-  if (isProductionMissingCrypto(env)) {
-    const healthOnly = path === "/health" && method === "GET";
-    if (!healthOnly) {
-      return errorResponse(apiT(locale, "encryptionNotConfigured"), 503);
+  if (env.ENVIRONMENT === "production") {
+    if (!env.SENTINEL_DESTINATION_SECRET_KEY?.trim()) {
+      throw new Error("SENTINEL_DESTINATION_SECRET_KEY is required in production");
+    }
+    if (!env.SENTINEL_INGESTION_SECRET_KEY?.trim()) {
+      throw new Error("SENTINEL_INGESTION_SECRET_KEY is required in production");
     }
   }
+
+  const deps = buildDependencies(env);
 
   try {
     if (method === "POST" && path.match(/^\/webhook\/[\w-]+\/[\w-]+$/)) {
