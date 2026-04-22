@@ -27,6 +27,8 @@ name = "sentinel-saas-prod"
 vars = { ENVIRONMENT = "production", LOG_LEVEL = "info", GEMINI_MODEL = "gemini-2.0-flash", SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK = "1" }
 
 # Optional vars (non-secret): SENTINEL_HTTP_PATH_PREFIX=/gateway si el Worker recibe /gateway/api/… pero WORKER_URL no incluye ese path.
+# NEGOTIATION_POLICY_INTERNAL_KEY (secret): cabecera `X-Sentinel-Internal-Policy-Key` en GET /api/public/negotiation-policy para datos completos (concesiones/control).
+# ALLOW_CORS_DEV=1 en [vars] solo si necesitás reflejar Origin en prod sin allowlist (no recomendado).
 # Secrets (set via `wrangler secret put <NAME>`):
 # SUPABASE_URL
 # SUPABASE_SERVICE_KEY

@@ -76,6 +76,10 @@ ${script}
     }
   }
 
+  /**
+   * Heurística “best effort”: concatenación u operadores dinámicos pueden eludir palabras prohibidas.
+   * La contención real de seguridad es QuickJS (memoria + interrupción por tiempo) y el límite de tamaño de salida.
+   */
   private validateScript(script: string): void {
     const dangerous =
       /\[\s*['"`]constructor['"`]\s*\]|__proto__|prototype\s*\[|\.constructor\b/;

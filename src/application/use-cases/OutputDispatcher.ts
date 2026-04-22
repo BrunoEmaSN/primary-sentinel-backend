@@ -1,7 +1,7 @@
 // src/application/use-cases/OutputDispatcher.ts
 // Dispatches a validated payload to ALL configured destinations in parallel.
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import mysql from "mysql2/promise";
 import * as jose from "jose";
@@ -17,18 +17,28 @@ import type {
 } from "../../domain/events/entities/Endpoint.js";
 import { createLogger } from "../../infrastructure/utils/logger.js";
 import { expandRootUrlToWorkerTestSink } from "../../domain/events/outboundHttpUrl.js";
+import { assertSafeOutboundHttpUrl } from "../../domain/events/safeOutboundUrl.js";
 
 const logger = createLogger("OutputDispatcher");
 
+type SupabaseInsertClient = SupabaseClient;
+
 export class OutputDispatcher {
+  private readonly supabaseClients = new Map<string, SupabaseInsertClient>();
   constructor(
     private readonly defaultSupabaseUrl: string,
     private readonly defaultSupabaseKey: string,
     /** Misma base que `WORKER_URL` en wrangler: expande `/` → sink de prueba en ese host. */
     private readonly workerPublicBaseUrl?: string,
     /** Ver `SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK` en WorkerEnv. */
-    private readonly loopbackRootUsesWorkerSink?: boolean
+    private readonly loopbackRootUsesWorkerSink?: boolean,
+    /** En producción no se permite `http:` salvo tras expand a HTTPS del Worker. */
+    private readonly isProduction = true
   ) {}
+
+  private allowHttpOnLoopbackForOutbound(): boolean {
+    return !this.isProduction;
+  }
 
   async dispatch(
     destinations: Destination[],
@@ -107,10 +117,20 @@ export class OutputDispatcher {
     }
   }
 
+  private getSupabaseClient(url: string, key: string): SupabaseInsertClient {
+    const cacheKey = `${url}\0${key}`;
+    let client = this.supabaseClients.get(cacheKey);
+    if (!client) {
+      client = createClient(url, key);
+      this.supabaseClients.set(cacheKey, client);
+    }
+    return client;
+  }
+
   private async toSupabase(dest: SupabaseDestination, payload: unknown): Promise<void> {
     const url = dest.projectUrl ?? this.defaultSupabaseUrl;
     const key = dest.serviceKey ?? this.defaultSupabaseKey;
-    const client = createClient(url, key);
+    const client = this.getSupabaseClient(url, key);
     const { error } = await client.from(dest.tableName).insert(payload);
     if (error) throw new Error(`Supabase insert error: ${error.message}`);
   }
@@ -125,6 +145,9 @@ export class OutputDispatcher {
         fetchUrl,
       });
     }
+    assertSafeOutboundHttpUrl(fetchUrl, {
+      allowHttpOnLoopback: this.allowHttpOnLoopbackForOutbound(),
+    });
     const body = dest.wrapKey
       ? JSON.stringify({ [dest.wrapKey]: payload })
       : JSON.stringify(payload);
@@ -175,6 +198,9 @@ export class OutputDispatcher {
   private async toHttpApi(dest: HttpApiDestination, payload: unknown): Promise<number> {
     const fetchUrl = expandRootUrlToWorkerTestSink(dest.url, this.workerPublicBaseUrl, {
       loopbackRootUsesWorkerSink: this.loopbackRootUsesWorkerSink,
+    });
+    assertSafeOutboundHttpUrl(fetchUrl, {
+      allowHttpOnLoopback: this.allowHttpOnLoopbackForOutbound(),
     });
     const authHeaders: Record<string, string> = {};
 

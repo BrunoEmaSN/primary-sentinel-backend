@@ -455,8 +455,8 @@ export class TenantInfraAdapter {
   }
 
   /**
-   * Política completa para IA de ventas/negociación: precios con piso, promos, concesiones give-to-get y límites.
-   * GET público sin JWT.
+   * Política completa para IA de ventas/negociación (concesiones + control).
+   * Exponer solo vía `GET /api/public/negotiation-policy` con cabecera interna configurada en el Worker.
    */
   async getNegotiationPolicy(): Promise<{
     plans: PublicPricingPlan[];

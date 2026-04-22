@@ -12,14 +12,9 @@ export function generateWebhookSecret(): string {
     .join("");
 }
 
-export function hashFingerprint(...parts: string[]): string {
-  const input = parts.join("|");
-  let hash = 5381;
-  for (let i = 0; i < input.length; i++) {
-    hash = ((hash << 5) + hash) ^ input.charCodeAt(i);
-    hash = hash >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+/** Huella para caché de reglas de healing (SHA-256 hex completo, no colisionable como DJB2 32-bit). */
+export async function hashFingerprint(...parts: string[]): Promise<string> {
+  return sha256(parts.join("|"));
 }
 
 export async function sha256(data: string): Promise<string> {
@@ -35,6 +30,16 @@ export function timingSafeEqual(a: string, b: string): boolean {
   let result = 0;
   for (let i = 0; i < a.length; i++) {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
+/** Comparación en tiempo constante para MACs o firmas binarias. */
+export function timingSafeEqualUint8(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a[i]! ^ b[i]!;
   }
   return result === 0;
 }

@@ -79,7 +79,7 @@ wrangler kv:namespace create "RULE_CACHE" --preview
 wrangler r2 bucket create sentinel-dlq
 ```
 
-Copy the KV IDs into `wrangler.toml`.
+Copy the KV IDs into `wrangler.toml`. El rate limiting HTTP (sink + webhooks) usa **Upstash Redis** (`INCR` atómico); el namespace `RULE_CACHE` puede quedar reservado para usos futuros.
 
 ### 3. Supabase
 
@@ -127,6 +127,12 @@ npm test              # unit tests
 ### POST `/webhook/:tenantId/:endpointSlug`
 
 Public. Receives raw payload, validates, heals, dispatches to all destinations.
+
+**Authentication:** every request **must** include `X-Sentinel-Signature: sha256=<hex>` where `<hex>` is the HMAC-SHA256 of the **raw** request body bytes using the endpoint’s `webhookSecret` (returned once when the endpoint is created).
+
+### JS transformation sandbox (security)
+
+Healing scripts run in **QuickJS** (WASM) with a hard **CPU deadline** (`shouldInterruptAfterDeadline`), a **memory limit**, and a cap on serialized output size. A string blocklist in `JSSandboxAdapter` catches obvious patterns but is **not** a security boundary (it can be evaded with string concatenation or dynamic property access). Treat QuickJS limits + timeouts as the real containment.
 
 **Response:**
 ```json

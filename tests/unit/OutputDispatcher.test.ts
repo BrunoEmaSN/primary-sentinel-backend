@@ -93,6 +93,20 @@ describe("OutputDispatcher", () => {
       );
     });
 
+    it("does not fetch blocked SSRF URLs (link-local IP)", async () => {
+      const dest: Destination = {
+        type: "webhook",
+        url: "https://169.254.169.254/latest/meta-data",
+        method: "POST",
+        retryOnFailure: false,
+        timeoutMs: 5000,
+      };
+      const results = await dispatcher.dispatch([dest], { x: 1 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(results[0]!.success).toBe(false);
+      expect(String(results[0]!.error)).toMatch(/not allowed|Non-public/i);
+    });
+
     it("returns success result when webhook responds 200", async () => {
       fetchMock.mockResolvedValue({ ok: true, status: 200 });
 

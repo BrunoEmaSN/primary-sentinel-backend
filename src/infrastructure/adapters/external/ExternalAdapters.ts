@@ -36,6 +36,29 @@ export class UpstashRuleCache implements IRuleCache {
   }
 }
 
+/** Rate limiting atómico (INCR + EX) sobre Upstash; evita TOCTOU de KV get/put. */
+export class UpstashSlidingRateLimiter {
+  private readonly prefix = "sentinel:ratelimit:";
+
+  constructor(private readonly redis: Redis) {}
+
+  async check(
+    key: string,
+    limit: number,
+    windowSeconds: number
+  ): Promise<{ allowed: boolean; remaining: number }> {
+    const fullKey = `${this.prefix}${key}`;
+    const count = await this.redis.incr(fullKey);
+    if (count === 1) {
+      await this.redis.expire(fullKey, windowSeconds);
+    }
+    if (count > limit) {
+      return { allowed: false, remaining: 0 };
+    }
+    return { allowed: true, remaining: limit - count };
+  }
+}
+
 // ── Cloudflare R2 — Dead Letter Queue storage ─────────────────────────────────
 
 const DLQ_KEY_PREFIX = /^dlq\/([^/]+)\//;

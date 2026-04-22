@@ -6,6 +6,34 @@ import { describe, it, expect, beforeAll } from "vitest";
 const WORKER_URL = process.env["WORKER_URL"] ?? "http://localhost:8787";
 const TOKEN      = process.env["TEST_TENANT_TOKEN"] ?? "";
 
+async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const buf = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function signedWebhookHeaders(
+  secret: string,
+  body: string,
+  extra: Record<string, string> = {}
+): Promise<Record<string, string>> {
+  const sig = await hmacSha256Hex(secret, body);
+  return {
+    "Content-Type": "application/json",
+    "X-Sentinel-Signature": `sha256=${sig}`,
+    ...extra,
+  };
+}
+
 describe.skipIf(!TOKEN)("Webhook ingestion — integration", () => {
   let endpointId: string;
   let webhookUrl: string;
@@ -59,13 +87,13 @@ describe.skipIf(!TOKEN)("Webhook ingestion — integration", () => {
   });
 
   it("processes a valid payload and dispatches to all destinations", async () => {
+    const raw = JSON.stringify({ id: "evt-abc", event: "user.created" });
     const res = await fetch(webhookUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      headers: await signedWebhookHeaders(webhookSecret, raw, {
         "X-Event-ID": `test-${Date.now()}`,
-      },
-      body: JSON.stringify({ id: "evt-abc", event: "user.created" }),
+      }),
+      body: raw,
     });
 
     expect(res.status).toBe(200);
@@ -81,13 +109,13 @@ describe.skipIf(!TOKEN)("Webhook ingestion — integration", () => {
 
   it("heals a broken payload and dispatches healed data", async () => {
     // Wrong types — schema expects strings, we send wrong field names
+    const raw = JSON.stringify({ user_id: 999, event_type: "signup" });
     const res = await fetch(webhookUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      headers: await signedWebhookHeaders(webhookSecret, raw, {
         "X-Event-ID": `heal-${Date.now()}`,
-      },
-      body: JSON.stringify({ user_id: 999, event_type: "signup" }),
+      }),
+      body: raw,
     });
 
     // Either healed (200) or dead (422)
@@ -98,13 +126,16 @@ describe.skipIf(!TOKEN)("Webhook ingestion — integration", () => {
 
   it("returns 429 after rate limit is exceeded", async () => {
     // Artificially spam requests
-    const promises = Array.from({ length: 10 }, (_, i) =>
-      fetch(webhookUrl, {
+    const promises = Array.from({ length: 10 }, async (_, i) => {
+      const raw = JSON.stringify({ id: "x", event: "test" });
+      return fetch(webhookUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Event-ID": `spam-${i}-${Date.now()}` },
-        body: JSON.stringify({ id: "x", event: "test" }),
-      })
-    );
+        headers: await signedWebhookHeaders(webhookSecret, raw, {
+          "X-Event-ID": `spam-${i}-${Date.now()}`,
+        }),
+        body: raw,
+      });
+    });
     await Promise.allSettled(promises);
     // This test is best-effort — rate limiting depends on KV state
   });

@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import type { ZodRawShape, ZodTypeAny } from "zod";
+import { assertSafeOutboundHttpUrl } from "../safeOutboundUrl.js";
 
 export type EndpointStatus = "active" | "paused" | "error";
 
@@ -51,26 +52,50 @@ export const SupabaseDestinationSchema = z
     return out;
   });
 
-export const WebhookDestinationSchema = z.object({
-  type: z.literal("webhook"),
-  url: z.string().url(),
-  method: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
-  headers: z.record(z.string()).optional(),
-  wrapKey: z.string().optional(),
-  retryOnFailure: z.boolean().default(true),
-  timeoutMs: z.number().min(500).max(10000).default(5000),
-});
+export const WebhookDestinationSchema = z
+  .object({
+    type: z.literal("webhook"),
+    url: z.string().url(),
+    method: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
+    headers: z.record(z.string()).optional(),
+    wrapKey: z.string().optional(),
+    retryOnFailure: z.boolean().default(true),
+    timeoutMs: z.number().min(500).max(10000).default(5000),
+  })
+  .superRefine((data, ctx) => {
+    try {
+      assertSafeOutboundHttpUrl(data.url, { allowHttpOnLoopback: true });
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : "Unsafe URL",
+        path: ["url"],
+      });
+    }
+  });
 
-export const HttpApiDestinationSchema = z.object({
-  type: z.literal("http_api"),
-  url: z.string().url(),
-  method: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
-  authType: z.enum(["bearer", "basic", "api_key", "none"]).default("none"),
-  authValue: z.string().optional(),
-  authHeader: z.string().optional(),
-  headers: z.record(z.string()).optional(),
-  timeoutMs: z.number().min(500).max(10000).default(5000),
-});
+export const HttpApiDestinationSchema = z
+  .object({
+    type: z.literal("http_api"),
+    url: z.string().url(),
+    method: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
+    authType: z.enum(["bearer", "basic", "api_key", "none"]).default("none"),
+    authValue: z.string().optional(),
+    authHeader: z.string().optional(),
+    headers: z.record(z.string()).optional(),
+    timeoutMs: z.number().min(500).max(10000).default(5000),
+  })
+  .superRefine((data, ctx) => {
+    try {
+      assertSafeOutboundHttpUrl(data.url, { allowHttpOnLoopback: true });
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : "Unsafe URL",
+        path: ["url"],
+      });
+    }
+  });
 
 export const PostgresDestinationSchema = z.object({
   type: z.literal("postgres"),

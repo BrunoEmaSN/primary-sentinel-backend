@@ -250,7 +250,7 @@ export class ProcessWebhookEvent {
     await this.eventRepo.updateStatus(event);
 
     // Step 4A: Cache lookup
-    const errorFingerprint = hashFingerprint(
+    const errorFingerprint = await hashFingerprint(
       endpoint.id,
       JSON.stringify(endpoint.schema),
       validationErrors.join("|")

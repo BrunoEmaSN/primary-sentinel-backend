@@ -6,6 +6,10 @@ const ES = {
   rateLimitExceeded: "Límite de solicitudes excedido",
   invalidWebhookUrl: "URL de webhook no válida",
   invalidWebhookSignature: "Firma de webhook no válida",
+  missingWebhookSignature: "Falta la cabecera X-Sentinel-Signature (HMAC-SHA256 del cuerpo)",
+  encryptionNotConfigured:
+    "El despliegue en producción requiere SENTINEL_DESTINATION_SECRET_KEY y SENTINEL_INGESTION_SECRET_KEY",
+  invalidSettingsPayload: "Cuerpo de ajustes no válido (solo campos permitidos y tipos correctos)",
   invalidJsonPayload: "Cuerpo JSON no válido",
   missingNameSchema: "Faltan campos obligatorios: name, schema",
   missingDestination: "Falta el campo obligatorio: destination o destinations",
@@ -73,6 +77,10 @@ const EN: Record<keyof typeof ES, string> = {
   rateLimitExceeded: "Rate limit exceeded",
   invalidWebhookUrl: "Invalid webhook URL",
   invalidWebhookSignature: "Invalid webhook signature",
+  missingWebhookSignature: "Missing X-Sentinel-Signature header (HMAC-SHA256 of the raw body)",
+  encryptionNotConfigured:
+    "Production requires SENTINEL_DESTINATION_SECRET_KEY and SENTINEL_INGESTION_SECRET_KEY",
+  invalidSettingsPayload: "Invalid settings body (allowed fields and types only)",
   invalidJsonPayload: "Invalid JSON payload",
   missingNameSchema: "Missing required fields: name, schema",
   missingDestination: "Missing required field: destination or destinations",

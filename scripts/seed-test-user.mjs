@@ -2,12 +2,11 @@
 /**
  * Crea un usuario de prueba en Supabase Auth (y el perfil vía trigger handle_new_user).
  *
- * Credenciales por defecto (solo desarrollo):
- *   Email:    sentinel-test@example.com
- *   Password: SentinelTest123!
+ * Contraseña: definí `SEED_TEST_PASSWORD` (obligatorio). Solo en local podés usar
+ *   `ALLOW_DEFAULT_SEED_CREDENTIALS=1` para permitir la contraseña de ejemplo del repo.
  *
  * Uso:
- *   export SUPABASE_URL=... SUPABASE_SERVICE_KEY=...
+ *   export SUPABASE_URL=... SUPABASE_SERVICE_KEY=... SEED_TEST_PASSWORD='...'
  *   node scripts/seed-test-user.mjs
  *
  * O deja SUPABASE_URL / SUPABASE_SERVICE_KEY en .dev.vars (raíz del backend).
@@ -68,7 +67,21 @@ const supabase = createClient(url, key, {
 
 const emailRaw = process.env.SEED_TEST_EMAIL || DEFAULT_EMAIL;
 const email = emailRaw.trim().toLowerCase();
-const password = process.env.SEED_TEST_PASSWORD || DEFAULT_PASSWORD;
+const allowDefaultCreds = process.env.ALLOW_DEFAULT_SEED_CREDENTIALS === "1";
+const password =
+  process.env.SEED_TEST_PASSWORD?.trim() ||
+  (allowDefaultCreds ? DEFAULT_PASSWORD : "");
+if (!password) {
+  console.error(
+    "Definí SEED_TEST_PASSWORD en el entorno, o ALLOW_DEFAULT_SEED_CREDENTIALS=1 solo para desarrollo local."
+  );
+  process.exit(1);
+}
+if (allowDefaultCreds && !process.env.SEED_TEST_PASSWORD?.trim()) {
+  console.warn(
+    "⚠️  ALLOW_DEFAULT_SEED_CREDENTIALS=1: usando contraseña de ejemplo del script (no uses en staging/producción)."
+  );
+}
 const fullName = process.env.SEED_TEST_FULL_NAME || DEFAULT_FULL_NAME;
 
 function isDuplicateUserError(msg) {

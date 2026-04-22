@@ -71,4 +71,15 @@ describe("DestinationSchema", () => {
     expect(d.type).toBe("webhook");
     if (d.type === "webhook") expect(d.url).toContain("/post");
   });
+
+  it("rejects webhook URL pointing to link-local metadata IP", () => {
+    const r = DestinationSchema.safeParse({
+      type: "webhook",
+      url: "https://169.254.169.254/latest/meta-data",
+      method: "POST",
+      retryOnFailure: false,
+      timeoutMs: 5000,
+    });
+    expect(r.success).toBe(false);
+  });
 });

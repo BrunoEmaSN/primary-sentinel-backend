@@ -8,7 +8,6 @@ import {
   jsonResponse,
   errorResponse,
   unauthorizedResponse,
-  checkRateLimit,
 } from "../middleware/auth.js";
 import { ProcessWebhookEvent } from "../../../application/use-cases/ProcessWebhookEvent.js";
 import {
@@ -21,13 +20,28 @@ import {
 import { ReinjectDlqEvent, DiscardDlqEvent } from "../../../application/use-cases/ManageDLQ.js";
 import { buildDependencies } from "../../container.js";
 import type { Dependencies } from "../../container.js";
-import { generateId } from "../../utils/crypto.js";
+import { generateId, timingSafeEqual } from "../../utils/crypto.js";
 import { createLogger } from "../../utils/logger.js";
 import { resolveIngestEventId } from "../webhookIngestIdentity.js";
 import { resolveApiLocale, type ApiLocale } from "../i18n/apiLocale.js";
 import { apiT, translateDomainError } from "../i18n/apiMessages.js";
+import {
+  MAX_AI_HISTORY_LIMIT,
+  MAX_LIST_LIMIT,
+  MAX_LIST_OFFSET,
+  MAX_METRICS_HOURS,
+  parseBoundedInt,
+} from "../queryParams.js";
+import { putSettingsBodySchema } from "../settingsSchema.js";
 
 const logger = createLogger("Router");
+
+function isProductionMissingCrypto(env: WorkerEnv): boolean {
+  if (env.ENVIRONMENT !== "production") return false;
+  return (
+    !env.SENTINEL_DESTINATION_SECRET_KEY?.trim() || !env.SENTINEL_INGESTION_SECRET_KEY?.trim()
+  );
+}
 
 function resolveHttpPathPrefix(env: WorkerEnv): string | undefined {
   const explicit = env.SENTINEL_HTTP_PATH_PREFIX?.trim();
@@ -102,12 +116,22 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
   const deps = buildDependencies(env);
 
+  if (isProductionMissingCrypto(env)) {
+    const healthOnly = path === "/health" && method === "GET";
+    if (!healthOnly) {
+      return errorResponse(apiT(locale, "encryptionNotConfigured"), 503);
+    }
+  }
+
   try {
     if (method === "POST" && path.match(/^\/webhook\/[\w-]+\/[\w-]+$/)) {
       return await handleWebhook(request, url, env, deps, locale, path);
     }
 
     if (path === "/health" && method === "GET") {
+      if (env.ENVIRONMENT === "production") {
+        return jsonResponse({ status: "ok" });
+      }
       return jsonResponse({ status: "ok", version: "2.0.0", ts: new Date().toISOString() });
     }
 
@@ -125,12 +149,12 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
 
     if (path === "/api/public/negotiation-policy" && method === "GET") {
-      return await handlePublicNegotiationPolicy(deps);
+      return await handlePublicNegotiationPolicy(request, env, deps);
     }
 
     /** POST JSON de prueba — acepta cualquier cuerpo; rate-limited por IP. */
     if (path === "/api/public/webhook-test-sink" && method === "POST") {
-      return await handlePublicWebhookTestSink(request, env, locale);
+      return await handlePublicWebhookTestSink(request, deps, locale);
     }
 
     const authResult = await authenticateRequest(request, env, locale);
@@ -182,7 +206,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return await handleGetSettings(auth, deps);
     }
     if (path === "/api/settings" && method === "PUT") {
-      return await handlePutSettings(request, auth, deps);
+      return await handlePutSettings(request, auth, deps, locale);
     }
 
     if (path === "/api/operations/dependency-graph" && method === "GET") {
@@ -234,7 +258,13 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   } catch (e) {
     const errInfo =
       e instanceof Error
-        ? { name: e.name, message: e.message, stack: e.stack }
+        ? env.ENVIRONMENT === "production"
+          ? {
+              name: e.name,
+              message: e.message,
+              errorId: crypto.randomUUID(),
+            }
+          : { name: e.name, message: e.message, stack: e.stack }
         : { value: String(e) };
     logger.error("Unhandled error", { error: errInfo, path, method });
     return errorResponse(translateDomainError(locale, e), 500);
@@ -244,11 +274,11 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 /** Destino HTTP de prueba (200 + JSON). Público; limitado por IP. */
 async function handlePublicWebhookTestSink(
   request: Request,
-  env: WorkerEnv,
+  deps: Dependencies,
   locale: ApiLocale
 ): Promise<Response> {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const { allowed } = await checkRateLimit(env.RULE_CACHE, `sink:${ip}`, 60, 60);
+  const { allowed } = await deps.rateLimiter.check(`sink:${ip}`, 60, 60);
   if (!allowed) return errorResponse(apiT(locale, "rateLimitExceeded"), 429);
   await request.text().catch(() => "");
   return jsonResponse({
@@ -269,19 +299,27 @@ async function handleWebhook(
   const [, , tenantId, endpointSlug] = pathname.split("/");
   if (!tenantId || !endpointSlug) return errorResponse(apiT(locale, "invalidWebhookUrl"), 400);
 
-  const { allowed } = await checkRateLimit(env.RULE_CACHE, `webhook:${tenantId}`, 1000, 60);
+  const { allowed } = await deps.rateLimiter.check(
+    `webhook:${tenantId}:${endpointSlug}`,
+    1000,
+    60
+  );
   if (!allowed) return errorResponse(apiT(locale, "rateLimitExceeded"), 429);
 
   const body = await request.text();
 
   const signature = request.headers.get("X-Sentinel-Signature");
-  if (signature) {
-    const endpoint = await deps.endpointRepo.findBySlug({ tenantId, slug: endpointSlug });
-    if (endpoint) {
-      const valid = await validateWebhookSignature(request, body, endpoint.webhookSecret, signature);
-      if (!valid) return unauthorizedResponse(apiT(locale, "invalidWebhookSignature"));
-    }
+  if (!signature?.trim()) {
+    return unauthorizedResponse(apiT(locale, "missingWebhookSignature"));
   }
+
+  const endpoint = await deps.endpointRepo.findBySlug({ tenantId, slug: endpointSlug });
+  if (!endpoint) {
+    return errorResponse(apiT(locale, "webhookEndpointSlugNotFound"), 404);
+  }
+
+  const valid = await validateWebhookSignature(request, body, endpoint.webhookSecret, signature);
+  if (!valid) return unauthorizedResponse(apiT(locale, "invalidWebhookSignature"));
 
   let rawPayload: unknown;
   try {
@@ -468,8 +506,8 @@ async function handleListEvents(
   const status = url.searchParams.get("status") as
     | import("../../../domain/events/entities/RawEvent.js").EventStatus
     | null;
-  const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
-  const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+  const limit = parseBoundedInt(url.searchParams.get("limit"), 20, 1, MAX_LIST_LIMIT);
+  const offset = parseBoundedInt(url.searchParams.get("offset"), 0, 0, MAX_LIST_OFFSET);
 
   const result = await deps.eventRepo.findByTenantAndEndpoint({
     tenantId: auth.tenantId,
@@ -501,8 +539,8 @@ async function handleListRules(
 }
 
 async function handleListDLQ(auth: AuthContext, url: URL, deps: Dependencies): Promise<Response> {
-  const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
-  const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+  const limit = parseBoundedInt(url.searchParams.get("limit"), 20, 1, MAX_LIST_LIMIT);
+  const offset = parseBoundedInt(url.searchParams.get("offset"), 0, 0, MAX_LIST_OFFSET);
   const endpointId = url.searchParams.get("endpointId");
 
   const result = await deps.eventRepo.findByTenantAndEndpoint({
@@ -605,17 +643,16 @@ async function handleGetSettings(auth: AuthContext, deps: Dependencies): Promise
   return jsonResponse(s);
 }
 
-async function handlePutSettings(request: Request, auth: AuthContext, deps: Dependencies): Promise<Response> {
-  const body = (await request.json()) as Record<string, unknown>;
-  await deps.tenantInfra.upsertSettings(auth.tenantId, {
-    notify_email_healing: body["notify_email_healing"] as boolean | undefined,
-    notify_email_dead: body["notify_email_dead"] as boolean | undefined,
-    notify_email_pending_rules: body["notify_email_pending_rules"] as boolean | undefined,
-    slack_on_incidents: body["slack_on_incidents"] as boolean | undefined,
-    slack_incoming_webhook_url: body["slack_incoming_webhook_url"] as string | null | undefined,
-    alert_webhook_url: body["alert_webhook_url"] as string | null | undefined,
-    alert_webhook_secret: body["alert_webhook_secret"] as string | null | undefined,
-  });
+async function handlePutSettings(
+  request: Request,
+  auth: AuthContext,
+  deps: Dependencies,
+  locale: ApiLocale
+): Promise<Response> {
+  const raw = await request.json().catch(() => undefined);
+  const parsed = putSettingsBodySchema.safeParse(raw);
+  if (!parsed.success) return errorResponse(apiT(locale, "invalidSettingsPayload"), 400);
+  await deps.tenantInfra.upsertSettings(auth.tenantId, parsed.data);
   return jsonResponse({ saved: true });
 }
 
@@ -637,13 +674,13 @@ async function handleDependencyGraph(auth: AuthContext, deps: Dependencies): Pro
 }
 
 async function handleAiHistory(url: URL, auth: AuthContext, deps: Dependencies): Promise<Response> {
-  const limit = parseInt(url.searchParams.get("limit") ?? "40", 10);
+  const limit = parseBoundedInt(url.searchParams.get("limit"), 40, 1, MAX_AI_HISTORY_LIMIT);
   const rows = await deps.tenantInfra.listAiDecisionLogs(auth.tenantId, limit);
   return jsonResponse({ data: rows });
 }
 
 async function handleStageMetrics(url: URL, auth: AuthContext, deps: Dependencies): Promise<Response> {
-  const hours = parseInt(url.searchParams.get("hours") ?? "24", 10);
+  const hours = parseBoundedInt(url.searchParams.get("hours"), 24, 1, MAX_METRICS_HOURS);
   const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
   const rows = await deps.tenantInfra.listStageMetrics(auth.tenantId, since);
   return jsonResponse({ data: rows, hours });
@@ -808,20 +845,35 @@ async function handlePublicPricing(deps: Dependencies): Promise<Response> {
   });
 }
 
-/** Política de negociación IA: pisos, concesiones, rondas, multiplicadores de urgencia (sin JWT). */
-async function handlePublicNegotiationPolicy(deps: Dependencies): Promise<Response> {
-  const policy = await deps.tenantInfra.getNegotiationPolicy();
+/** Público: solo catálogo de precios. Política completa con cabecera interna (M-02). */
+async function handlePublicNegotiationPolicy(
+  request: Request,
+  env: WorkerEnv,
+  deps: Dependencies
+): Promise<Response> {
+  const framework = {
+    version: "1.0",
+    steps: [
+      "profile_and_power_band",
+      "discount_trigger_and_value_tables",
+      "conditional_counter_offer",
+      "value_argument_copy",
+      "validate_and_send_or_escalate",
+    ],
+  } as const;
+
+  const configured = env.NEGOTIATION_POLICY_INTERNAL_KEY?.trim();
+  const supplied = request.headers.get("X-Sentinel-Internal-Policy-Key")?.trim();
+  if (configured && supplied && timingSafeEqual(configured, supplied)) {
+    const policy = await deps.tenantInfra.getNegotiationPolicy();
+    return jsonResponse({ ...policy, framework });
+  }
+
+  const catalog = await deps.tenantInfra.getPricingCatalog();
   return jsonResponse({
-    ...policy,
-    framework: {
-      version: "1.0",
-      steps: [
-        "profile_and_power_band",
-        "discount_trigger_and_value_tables",
-        "conditional_counter_offer",
-        "value_argument_copy",
-        "validate_and_send_or_escalate",
-      ],
-    },
+    plans: catalog.plans,
+    discounts: catalog.discounts,
+    policyScope: "public_pricing_only",
+    framework,
   });
 }

@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { createLogger } from "../../utils/logger.js";
+import { timingSafeEqualUint8 } from "../../utils/crypto.js";
 import type { ApiLocale } from "../i18n/apiLocale.js";
 import { apiT } from "../i18n/apiMessages.js";
 import type { WorkerEnv } from "../workerEnv.js";
@@ -51,9 +52,18 @@ export async function validateWebhookSignature(
   _request: Request,
   body: string,
   secret: string,
-  signature: string
+  signatureHeader: string
 ): Promise<boolean> {
-  if (!signature) return false;
+  const trimmed = signatureHeader.trim();
+  if (!trimmed) return false;
+
+  const sigHex = trimmed.startsWith("sha256=") ? trimmed.slice(7).trim() : trimmed;
+  if (!/^[0-9a-fA-F]+$/.test(sigHex) || sigHex.length % 2 !== 0) return false;
+
+  const sigBytes = new Uint8Array(sigHex.length / 2);
+  for (let i = 0; i < sigBytes.length; i++) {
+    sigBytes[i] = Number.parseInt(sigHex.slice(i * 2, i * 2 + 2), 16);
+  }
 
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -61,34 +71,14 @@ export async function validateWebhookSignature(
     encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["verify"]
+    ["sign"]
   );
 
-  const sigHex = signature.replace("sha256=", "");
-  const sigBytes = new Uint8Array(
-    sigHex.match(/.{2}/g)!.map((b) => parseInt(b, 16))
+  const mac = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, encoder.encode(body))
   );
-
-  return await crypto.subtle.verify(
-    "HMAC",
-    key,
-    sigBytes.buffer,
-    encoder.encode(body)
-  );
-}
-
-export async function checkRateLimit(
-  kv: KVNamespace,
-  key: string,
-  limit: number,
-  windowSeconds: number
-): Promise<{ allowed: boolean; remaining: number }> {
-  const kvKey = `ratelimit:${key}`;
-  const current = await kv.get(kvKey);
-  const count = current ? parseInt(current, 10) : 0;
-  if (count >= limit) return { allowed: false, remaining: 0 };
-  await kv.put(kvKey, String(count + 1), { expirationTtl: windowSeconds });
-  return { allowed: true, remaining: limit - count - 1 };
+  if (mac.length !== sigBytes.length) return false;
+  return timingSafeEqualUint8(mac, sigBytes);
 }
 
 export function unauthorizedResponse(message: string): Response {
@@ -113,9 +103,3 @@ export function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
-declare global {
-  interface KVNamespace {
-    get(key: string): Promise<string | null>;
-    put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
-  }
-}

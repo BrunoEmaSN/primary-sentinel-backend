@@ -34,4 +34,11 @@ export type WorkerEnv = {
   SENTINEL_LOOPBACK_ROOT_USES_WORKER_SINK?: string;
   /** Comma-separated exact origins for CORS (e.g. https://app.vercel.app). Empty/absent = permissive dev behavior. */
   ALLOWED_ORIGINS?: string;
+  /**
+   * Solo no-producción: si `ALLOWED_ORIGINS` está vacío, permite reflejar `Origin` (comportamiento antiguo).
+   * En producción nunca refleje orígenes sin allowlist salvo `1`/`true` aquí (no recomendado).
+   */
+  ALLOW_CORS_DEV?: string;
+  /** Clave compartida con workers internos; `GET /api/public/negotiation-policy` devuelve política completa si coincide. */
+  NEGOTIATION_POLICY_INTERNAL_KEY?: string;
 };

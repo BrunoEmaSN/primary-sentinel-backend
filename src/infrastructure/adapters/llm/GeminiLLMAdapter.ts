@@ -81,11 +81,16 @@ function parseRetryAfterMs(err: unknown): number | null {
   return Math.ceil(parseFloat(m[1]) * 1000);
 }
 
+const CIRCUIT_FAILURE_THRESHOLD = 5;
+const CIRCUIT_OPEN_MS = 60_000;
+
 export class GeminiLLMAdapter implements ILLMService {
   private readonly genAI: GoogleGenerativeAI;
   /** Active model id (may switch to {@link DEFAULT_GEMINI_MODEL} after 404/429 on a non-default model). */
   private modelId: string;
   private model: GenerativeModel;
+  private geminiFailures = 0;
+  private geminiCircuitOpenUntil = 0;
 
   constructor(apiKey: string, options?: GeminiLLMOptions) {
     this.genAI = new GoogleGenerativeAI(apiKey);
@@ -116,10 +121,26 @@ export class GeminiLLMAdapter implements ILLMService {
   }
 
   async generateTransformationScript(request: HealingRequest): Promise<HealingResult> {
+    if (Date.now() < this.geminiCircuitOpenUntil) {
+      throw new Error("Gemini temporarily unavailable (circuit open)");
+    }
     const userMessage = this.buildPrompt(request);
     logger.info("Calling Gemini API for transformation generation", { model: this.modelId });
 
-    const result = await this.generateContentWith429Retries(userMessage);
+    let result;
+    try {
+      result = await this.generateContentWith429Retries(userMessage);
+    } catch (e) {
+      this.geminiFailures++;
+      if (this.geminiFailures >= CIRCUIT_FAILURE_THRESHOLD) {
+        this.geminiCircuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+        this.geminiFailures = 0;
+        logger.warn("Gemini circuit breaker opened after repeated errors", {
+          openMs: CIRCUIT_OPEN_MS,
+        });
+      }
+      throw e;
+    }
     const response = result.response;
     const rawText = response.text();
 
@@ -138,6 +159,7 @@ export class GeminiLLMAdapter implements ILLMService {
       );
     }
 
+    this.geminiFailures = 0;
     return {
       success: true,
       script: parsed.script,

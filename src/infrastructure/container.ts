@@ -6,8 +6,10 @@ import {
   SupabaseEndpointRepository,
   SupabaseTransformationRuleRepository,
 } from "./adapters/database/SupabaseAdapters.js";
+import { Redis } from "@upstash/redis";
 import {
   UpstashRuleCache,
+  UpstashSlidingRateLimiter,
   R2StorageAdapter,
   CloudflareEmailNotificationService,
 } from "./adapters/external/ExternalAdapters.js";
@@ -22,6 +24,7 @@ export type Dependencies = {
   endpointRepo: SupabaseEndpointRepository;
   ruleRepo: SupabaseTransformationRuleRepository;
   ruleCache: UpstashRuleCache;
+  rateLimiter: UpstashSlidingRateLimiter;
   storageService: R2StorageAdapter;
   llmService: GeminiLLMAdapter;
   notificationService: CloudflareEmailNotificationService;
@@ -50,6 +53,9 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
   );
   const ruleRepo = new SupabaseTransformationRuleRepository(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
   const ruleCache = new UpstashRuleCache(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
+  const rateLimiter = new UpstashSlidingRateLimiter(
+    new Redis({ url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN })
+  );
   const storageService = new R2StorageAdapter(env.DLQ_BUCKET, env.SENTINEL_INGESTION_SECRET_KEY);
   const llmService = new GeminiLLMAdapter(env.AI_API_KEY, {
     modelId: env.GEMINI_MODEL,
@@ -73,7 +79,8 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_KEY,
     env.WORKER_URL,
-    loopbackSink
+    loopbackSink,
+    env.ENVIRONMENT === "production"
   );
 
   _deps = {
@@ -81,6 +88,7 @@ export function buildDependencies(env: WorkerEnv): Dependencies {
     endpointRepo,
     ruleRepo,
     ruleCache,
+    rateLimiter,
     storageService,
     llmService,
     notificationService,
