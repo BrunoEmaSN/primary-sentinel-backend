@@ -7,6 +7,7 @@ import {
   type IncidentKind,
 } from "../../domain/notifications/incidentSummary.js";
 import type { TenantInfraAdapter } from "../adapters/database/TenantInfraAdapter.js";
+import { assertSafeOutboundHttpUrl } from "../../domain/events/safeOutboundUrl.js";
 import { hmacSha256Hex } from "../utils/hmacSign.js";
 import { createLogger } from "../utils/logger.js";
 
@@ -82,6 +83,9 @@ export class IncidentAlertOrchestrator {
       (params.kind === "dead_letter" || !suppressNonCritical);
 
     if (slackAllowed && settings.slack_incoming_webhook_url) {
+      assertSafeOutboundHttpUrl(settings.slack_incoming_webhook_url, {
+        allowHttpOnLoopback: false,
+      });
       await fetch(settings.slack_incoming_webhook_url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,6 +94,7 @@ export class IncidentAlertOrchestrator {
     }
 
     if (settings.alert_webhook_url && settings.alert_webhook_secret) {
+      assertSafeOutboundHttpUrl(settings.alert_webhook_url, { allowHttpOnLoopback: false });
       const bodyObj = { incident: summary };
       const raw = JSON.stringify(bodyObj);
       const sig = await hmacSha256Hex(settings.alert_webhook_secret, raw);
