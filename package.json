@@ -14,10 +14,12 @@
     "seed:test-user": "node scripts/seed-test-user.mjs"
   },
   "dependencies": {
-    "@jitl/quickjs-wasmfile-release-sync": "*",
     "@google/generative-ai": "^0.24.0",
+    "@jitl/quickjs-wasmfile-release-sync": "*",
     "@supabase/supabase-js": "^2.43.0",
     "@upstash/redis": "^1.28.0",
+    "acorn": "^8.16.0",
+    "acorn-walk": "^8.3.5",
     "jose": "^6.2.2",
     "mysql2": "^3.20.0",
     "postgres": "^3.4.9",

@@ -8,6 +8,7 @@ import {
 } from "quickjs-emscripten";
 import type { ISandboxService, SandboxResult } from "../../../application/ports/index.js";
 import { createLogger } from "../../utils/logger.js";
+import { assertScriptPassesAstPolicy } from "./scriptAstPolicy.js";
 
 /** Pre-bundled by Wrangler (`[[rules]]` CompiledWasm); avoids fetch / instantiateStreaming in Workers. */
 import quickjsWasmModule from "../../../../node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.wasm";
@@ -17,6 +18,8 @@ const logger = createLogger("JSSandboxAdapter");
 const MAX_EXECUTION_TIME_MS = 5000;
 const MAX_OUTPUT_SIZE_BYTES = 1024 * 512;
 const QUICKJS_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024;
+/** Operational cap (not a security boundary): avoids huge payloads before eval. */
+const MAX_SCRIPT_LENGTH = 10_000;
 
 type QuickJsModule = Awaited<ReturnType<typeof newQuickJSWASMModuleFromVariant>>;
 
@@ -30,11 +33,22 @@ function getQuickJsModule(): Promise<QuickJsModule> {
   return quickJsSingleton;
 }
 
+/**
+ * Runs tenant JS in QuickJS (WASM). Before eval, Acorn walks the AST to reject computed
+ * member access and `new Function` (defense in depth; not a full capability boundary).
+ * Execution is still bounded by QuickJS memory limit, `shouldInterruptAfterDeadline`, and
+ * max serialized output size.
+ */
 export class JSSandboxAdapter implements ISandboxService {
   async execute(script: string, input: unknown): Promise<SandboxResult> {
     const start = Date.now();
     try {
-      this.validateScript(script);
+      if (script.length > MAX_SCRIPT_LENGTH) {
+        throw new SandboxCompileError(
+          `Script exceeds max length (${MAX_SCRIPT_LENGTH} chars)`,
+        );
+      }
+      assertScriptPassesAstPolicy(script);
       const output = await this.runInQuickJs(script, input);
 
       const outputStr = JSON.stringify(output);
@@ -75,54 +89,8 @@ ${script}
       throw new SandboxCompileError(`Execution failed: ${String(e)}`);
     }
   }
-
-  /**
-   * Heurística “best effort”: concatenación u operadores dinámicos pueden eludir palabras prohibidas.
-   * La contención real de seguridad es QuickJS (memoria + interrupción por tiempo) y el límite de tamaño de salida.
-   */
-  private validateScript(script: string): void {
-    const dangerous =
-      /\[\s*['"`]constructor['"`]\s*\]|__proto__|prototype\s*\[|\.constructor\b/;
-    if (dangerous.test(script)) {
-      throw new SandboxSecurityError("Forbidden pattern detected");
-    }
-    const forbidden = [
-      "globalThis",
-      "process",
-      "require(",
-      "import(",
-      "__dirname",
-      "__filename",
-      "eval(",
-      "Function(",
-      "setTimeout",
-      "setInterval",
-      "fetch(",
-      "XMLHttpRequest",
-      "WebSocket",
-      "constructor",
-      "prototype",
-      "__proto__",
-      "Reflect",
-      "Proxy",
-      "Symbol",
-      "arguments.callee",
-      ".constructor",
-    ];
-    for (const pattern of forbidden) {
-      if (script.includes(pattern)) {
-        throw new SandboxSecurityError(`Forbidden pattern: '${pattern}'`);
-      }
-    }
-    if (script.length > 10_000) {
-      throw new SandboxSecurityError("Script exceeds max length (10,000 chars)");
-    }
-  }
 }
 
-export class SandboxSecurityError extends Error {
-  constructor(msg: string) { super(msg); this.name = "SandboxSecurityError"; }
-}
 export class SandboxCompileError extends Error {
   constructor(msg: string) { super(msg); this.name = "SandboxCompileError"; }
 }

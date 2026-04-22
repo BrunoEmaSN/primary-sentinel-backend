@@ -132,7 +132,7 @@ Public. Receives raw payload, validates, heals, dispatches to all destinations.
 
 ### JS transformation sandbox (security)
 
-Healing scripts run in **QuickJS** (WASM) with a hard **CPU deadline** (`shouldInterruptAfterDeadline`), a **memory limit**, and a cap on serialized output size. A string blocklist in `JSSandboxAdapter` catches obvious patterns but is **not** a security boundary (it can be evaded with string concatenation or dynamic property access). Treat QuickJS limits + timeouts as the real containment.
+Healing scripts run in **QuickJS** (WASM) with a hard **CPU deadline** (`shouldInterruptAfterDeadline`), a **memory limit**, a cap on **serialized output** size, and a **max script length** (operational). Before execution, **Acorn** parses the script and rejects **computed member expressions** (`obj[key]`, including optional chaining) and **`new Function`** (including parenthesized or qualified callees like `new x.Function`). That AST pass is **defense in depth** only: it narrows some dynamic-access and code-generation patterns; it is **not** a complete capability boundary. Residual risk (e.g. `Function()` without `new`, `eval`, or other vectors) still depends on QuickJS limits and your threat model.
 
 **Response:**
 ```json
