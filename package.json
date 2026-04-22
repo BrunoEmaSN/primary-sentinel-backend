@@ -11,27 +11,28 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "type-check": "tsc --noEmit",
+    "audit": "npm audit",
     "seed:test-user": "node scripts/seed-test-user.mjs"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.0",
-    "@jitl/quickjs-wasmfile-release-sync": "*",
-    "@supabase/supabase-js": "^2.43.0",
-    "@upstash/redis": "^1.28.0",
-    "acorn": "^8.16.0",
-    "acorn-walk": "^8.3.5",
-    "jose": "^6.2.2",
-    "mysql2": "^3.20.0",
-    "postgres": "^3.4.9",
-    "quickjs-emscripten": "^0.32.0",
-    "zod": "^3.23.8"
+    "@google/generative-ai": "0.24.1",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@supabase/supabase-js": "2.101.1",
+    "@upstash/redis": "1.37.0",
+    "acorn": "8.16.0",
+    "acorn-walk": "8.3.5",
+    "jose": "6.2.2",
+    "mysql2": "3.20.0",
+    "postgres": "3.4.9",
+    "quickjs-emscripten": "0.32.0",
+    "zod": "3.25.76"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240524.0",
-    "@types/node": "^20.14.0",
-    "@vitest/coverage-v8": "^4.1.2",
-    "typescript": "^5.4.5",
-    "vitest": "^4.1.2",
-    "wrangler": "^4.80.0"
+    "@cloudflare/workers-types": "4.20260405.1",
+    "@types/node": "20.19.39",
+    "@vitest/coverage-v8": "4.1.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.2",
+    "wrangler": "4.80.0"
   }
 }
